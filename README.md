@@ -44,27 +44,27 @@ import { UniversalCommand } from '@supernal/universal-command';
 export const requirementList = new UniversalCommand({
   name: 'requirement list',
   description: 'List all requirements',
-  
+
   input: {
     parameters: [
       {
         name: 'status',
         type: 'string',
         description: 'Filter by status',
-        enum: ['draft', 'in-progress', 'done']
-      }
-    ]
+        enum: ['draft', 'in-progress', 'done'],
+      },
+    ],
   },
-  
+
   // Single handler works everywhere
   handler: async (args, context) => {
     return await fetchRequirements({ status: args.status });
   },
-  
+
   // Optional: CLI-specific formatting
   cli: {
-    format: (results) => results.map(r => `${r.id}: ${r.title}`).join('\n')
-  }
+    format: (results) => results.map((r) => `${r.id}: ${r.title}`).join('\n'),
+  },
 });
 ```
 
@@ -86,31 +86,37 @@ const mcpTool = requirementList.toMCP();
 ## Features
 
 ### 🎯 **Single Source of Truth**
+
 - Define command logic once
 - CLI, API, MCP stay in sync automatically
 - No duplication, no drift
 
 ### 🚀 **Zero Overhead**
+
 - Thin wrappers around your handler
 - No performance penalty
 - Direct function calls
 
 ### 🔧 **Framework Agnostic**
+
 - Bring your own handler implementation
 - Works with any framework
 - No vendor lock-in
 
 ### 📦 **Interface-Specific Overrides**
+
 - CLI: Custom formatting, progress bars
 - API: Caching, rate limiting, auth
 - MCP: Resource links, capabilities
 
 ### 🛡️ **Type Safe**
+
 - Full TypeScript support
 - Input/output validation
 - Compile-time error detection
 
 ### 🧪 **Testable**
+
 - Test handler once, works everywhere
 - Mock context for testing
 - Integration test helpers
@@ -124,6 +130,7 @@ npm install @supernal/universal-command
 ```
 
 **Peer dependencies**:
+
 ```bash
 # For CLI generation
 npm install commander
@@ -149,31 +156,31 @@ export const userCreate = new UniversalCommand({
   name: 'user create',
   description: 'Create a new user',
   category: 'users',
-  
+
   input: {
     parameters: [
       {
         name: 'name',
         type: 'string',
         description: 'User name',
-        required: true
+        required: true,
       },
       {
         name: 'email',
         type: 'string',
         description: 'User email',
-        required: true
+        required: true,
       },
       {
         name: 'role',
         type: 'string',
         description: 'User role',
         default: 'user',
-        enum: ['user', 'admin']
-      }
-    ]
+        enum: ['user', 'admin'],
+      },
+    ],
   },
-  
+
   output: {
     type: 'json',
     schema: {
@@ -181,21 +188,21 @@ export const userCreate = new UniversalCommand({
       properties: {
         id: { type: 'string' },
         name: { type: 'string' },
-        email: { type: 'string' }
-      }
-    }
+        email: { type: 'string' },
+      },
+    },
   },
-  
+
   handler: async (args, context) => {
     // Your implementation
     const user = await createUser({
       name: args.name,
       email: args.email,
-      role: args.role
+      role: args.role,
     });
-    
+
     return user;
-  }
+  },
 });
 ```
 
@@ -243,7 +250,7 @@ import { userCreate } from './commands/user-create';
 const server = new Server({ name: 'my-mcp-server' });
 
 server.setRequestHandler('tools/list', async () => ({
-  tools: [userCreate.toMCP()]
+  tools: [userCreate.toMCP()],
 }));
 
 server.setRequestHandler('tools/call', async (request) => {
@@ -263,7 +270,7 @@ server.setRequestHandler('tools/call', async (request) => {
 new UniversalCommand({
   name: 'data export',
   // ... base definition ...
-  
+
   // CLI-specific
   cli: {
     format: (data) => {
@@ -271,31 +278,31 @@ new UniversalCommand({
       return JSON.stringify(data, null, 2);
     },
     streaming: true, // Support streaming output
-    progress: true   // Show progress bar
+    progress: true, // Show progress bar
   },
-  
+
   // API-specific
   api: {
-    method: 'GET',  // Default: infer from handler
+    method: 'GET', // Default: infer from handler
     cacheControl: {
       maxAge: 300,
-      staleWhileRevalidate: 60
+      staleWhileRevalidate: 60,
     },
     rateLimit: {
       requests: 100,
-      window: '1m'
+      window: '1m',
     },
     auth: {
       required: true,
-      roles: ['admin']
-    }
+      roles: ['admin'],
+    },
   },
-  
+
   // MCP-specific
   mcp: {
     resourceLinks: ['export://results'],
-    capabilities: ['streaming']
-  }
+    capabilities: ['streaming'],
+  },
 });
 ```
 
@@ -310,19 +317,19 @@ handler: async (args, context) => {
       // CLI-specific logic
       console.log('Running from CLI');
       break;
-      
+
     case 'api':
       // Access request object
       const userId = context.request.headers.get('x-user-id');
       break;
-      
+
     case 'mcp':
       // MCP-specific logic
       break;
   }
-  
+
   return result;
-}
+};
 ```
 
 ### Validation
@@ -337,15 +344,15 @@ input: {
       type: 'number',
       required: true,
       min: 0,
-      max: 120
+      max: 120,
     },
     {
       name: 'email',
       type: 'string',
       required: true,
-      pattern: '^[^@]+@[^@]+\\.[^@]+$'
-    }
-  ]
+      pattern: '^[^@]+@[^@]+\\.[^@]+$',
+    },
+  ];
 }
 ```
 
@@ -354,17 +361,15 @@ input: {
 ```typescript
 handler: async (args, context) => {
   if (!isValid(args.email)) {
-    throw new CommandError(
-      'Invalid email address',
-      { code: 'INVALID_EMAIL', status: 400 }
-    );
+    throw new CommandError('Invalid email address', { code: 'INVALID_EMAIL', status: 400 });
   }
-  
+
   return result;
-}
+};
 ```
 
 Errors are automatically formatted for each interface:
+
 - **CLI**: Formatted error message with exit code
 - **API**: JSON error response with status code
 - **MCP**: MCP error format
@@ -391,7 +396,7 @@ server.command({
   description: 'Check system health',
   input: { parameters: [] },
   output: { type: 'json' },
-  handler: async () => ({ status: 'ok' })
+  handler: async () => ({ status: 'ok' }),
 });
 ```
 
@@ -431,7 +436,7 @@ const server = createServer();
 await server.startMCP({
   name: 'my-mcp-server',
   version: '1.0.0',
-  transport: 'stdio'
+  transport: 'stdio',
 });
 ```
 
@@ -487,11 +492,12 @@ import { generateNextRoutes } from '@supernal/universal-command/codegen';
 
 await generateNextRoutes(registry, {
   outputDir: 'app/api',
-  typescript: true
+  typescript: true,
 });
 ```
 
 Generates:
+
 ```
 app/api/
   users/
@@ -512,7 +518,7 @@ import { createMCPServer } from '@supernal/universal-command/mcp';
 
 const server = createMCPServer(registry, {
   name: 'my-mcp-server',
-  version: '1.0.0'
+  version: '1.0.0',
 });
 
 server.connect(transport);
@@ -559,9 +565,9 @@ import { userCreate } from './user-create';
 test('creates user', async () => {
   const result = await userCreate.execute(
     { name: 'Alice', email: 'alice@example.com' },
-    { interface: 'test' }  // Test context
+    { interface: 'test' } // Test context
   );
-  
+
   expect(result.name).toBe('Alice');
 });
 ```
@@ -573,26 +579,26 @@ import { testCLI, testAPI, testMCP } from '@supernal/universal-command/testing';
 
 test('CLI integration', async () => {
   const output = await testCLI(userCreate, {
-    args: ['--name', 'Alice', '--email', 'alice@example.com']
+    args: ['--name', 'Alice', '--email', 'alice@example.com'],
   });
-  
+
   expect(output).toContain('Created user');
 });
 
 test('API integration', async () => {
   const response = await testAPI(userCreate, {
     method: 'POST',
-    body: { name: 'Alice', email: 'alice@example.com' }
+    body: { name: 'Alice', email: 'alice@example.com' },
   });
-  
+
   expect(response.status).toBe(200);
 });
 
 test('MCP integration', async () => {
   const result = await testMCP(userCreate, {
-    arguments: { name: 'Alice', email: 'alice@example.com' }
+    arguments: { name: 'Alice', email: 'alice@example.com' },
   });
-  
+
   expect(result.content[0].text).toContain('Alice');
 });
 ```
@@ -633,16 +639,16 @@ test('MCP integration', async () => {
 ```typescript
 class UniversalCommand<TInput, TOutput> {
   constructor(schema: CommandSchema<TInput, TOutput>);
-  
+
   // Execute command
   execute(args: TInput, context: ExecutionContext): Promise<TOutput>;
-  
+
   // Generate interfaces
   toCLI(): Command;
   toNextAPI(): NextAPIRoute;
   toExpressAPI(): ExpressRoute;
   toMCP(): MCPToolDefinition;
-  
+
   // Utilities
   validateArgs(args: unknown): ValidationResult<TInput>;
   getAPIRoutePath(): string;
@@ -657,18 +663,18 @@ interface CommandSchema<TInput, TOutput> {
   name: string;
   description: string;
   category?: string;
-  
+
   input: {
     parameters: Parameter[];
   };
-  
+
   output: {
     type: 'json' | 'text' | 'stream';
     schema?: JSONSchema;
   };
-  
+
   handler: (args: TInput, context: ExecutionContext) => Promise<TOutput>;
-  
+
   // Interface-specific options
   cli?: CLIOptions;
   api?: APIOptions;
@@ -685,13 +691,13 @@ interface Parameter {
   description: string;
   required?: boolean;
   default?: any;
-  
+
   // Validation
   enum?: any[];
   min?: number;
   max?: number;
   pattern?: string;
-  items?: Parameter;  // For array type
+  items?: Parameter; // For array type
 }
 ```
 
@@ -701,10 +707,10 @@ interface Parameter {
 interface ExecutionContext {
   interface: 'cli' | 'api' | 'mcp' | 'test';
   projectRoot?: string;
-  
+
   // API-specific
   request?: NextRequest | Request;
-  
+
   // CLI-specific
   stdout?: NodeJS.WriteStream;
   stderr?: NodeJS.WriteStream;
@@ -715,15 +721,15 @@ interface ExecutionContext {
 
 ## Comparison
 
-| Feature | Universal Command | Manual Implementation |
-|---------|-------------------|----------------------|
-| **Maintenance** | Define once | Define 3x (CLI/API/MCP) |
-| **Drift risk** | None (single source) | High (separate codebases) |
-| **Type safety** | Full TypeScript | Varies by interface |
-| **Validation** | Automatic | Manual per interface |
-| **Testing** | Test once | Test 3x |
-| **Documentation** | Auto-generated | Manual |
-| **Feature velocity** | High (add once) | Low (add 3x) |
+| Feature              | Universal Command    | Manual Implementation     |
+| -------------------- | -------------------- | ------------------------- |
+| **Maintenance**      | Define once          | Define 3x (CLI/API/MCP)   |
+| **Drift risk**       | None (single source) | High (separate codebases) |
+| **Type safety**      | Full TypeScript      | Varies by interface       |
+| **Validation**       | Automatic            | Manual per interface      |
+| **Testing**          | Test once            | Test 3x                   |
+| **Documentation**    | Auto-generated       | Manual                    |
+| **Feature velocity** | High (add once)      | Low (add 3x)              |
 
 ---
 
@@ -736,30 +742,30 @@ interface ExecutionContext {
 const issueCreate = new UniversalCommand({
   name: 'issue create',
   description: 'Create a GitHub issue',
-  
+
   input: {
     parameters: [
       { name: 'title', type: 'string', required: true },
       { name: 'body', type: 'string' },
-      { name: 'labels', type: 'array', items: { type: 'string' } }
-    ]
+      { name: 'labels', type: 'array', items: { type: 'string' } },
+    ],
   },
-  
+
   handler: async (args) => {
     return await octokit.issues.create({
       owner: 'org',
       repo: 'repo',
       title: args.title,
       body: args.body,
-      labels: args.labels
+      labels: args.labels,
     });
-  }
+  },
 });
 
 // Deploy everywhere
-const cli = issueCreate.toCLI();           // gh issue create
-const api = issueCreate.toNextAPI();       // POST /api/issues
-const mcp = issueCreate.toMCP();           // issue_create tool
+const cli = issueCreate.toCLI(); // gh issue create
+const api = issueCreate.toNextAPI(); // POST /api/issues
+const mcp = issueCreate.toMCP(); // issue_create tool
 ```
 
 ---
@@ -767,6 +773,7 @@ const mcp = issueCreate.toMCP();           // issue_create tool
 ## Roadmap
 
 ### v1.0 (Current)
+
 - ✅ Core abstraction
 - ✅ CLI generation (Commander.js)
 - ✅ Next.js API generation
@@ -774,16 +781,52 @@ const mcp = issueCreate.toMCP();           // issue_create tool
 - ✅ TypeScript support
 
 ### v1.1 (Planned)
+
 - 🔄 Express.js API generation
 - 🔄 Streaming support
 - 🔄 Progress indicators
 - 🔄 Auto-generated docs
 
 ### v2.0 (Future)
+
 - 📋 Hono API generation
 - 📋 FastAPI generation (Python)
 - 📋 gRPC generation
 - 📋 GraphQL generation
+
+---
+
+## Development Workflow
+
+This project uses the [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) workflow system for requirement tracking and test traceability.
+
+### Requirements
+
+All features are documented as requirements in `.supernal/requirements/`:
+
+| Requirement                                                               | Description            | Tests |
+| ------------------------------------------------------------------------- | ---------------------- | ----- |
+| [REQ-UC-001](.supernal/requirements/req-uc-001-universal-command-core.md) | Universal Command Core | 20    |
+| [REQ-UC-002](.supernal/requirements/req-uc-002-command-registry.md)       | Command Registry       | 16    |
+| [REQ-UC-003](.supernal/requirements/req-uc-003-code-generators.md)        | Code Generators        | 18    |
+| [REQ-UC-004](.supernal/requirements/req-uc-004-scope-registry.md)         | Scope Registry         | 30    |
+| [REQ-UC-005](.supernal/requirements/req-uc-005-testing-utilities.md)      | Testing Utilities      | 9     |
+
+### Git Hooks
+
+Pre-commit hooks ensure code quality:
+
+- **Lint-staged**: Format and lint staged files
+- **Type check**: TypeScript compilation
+- **Tests**: All 93 tests must pass
+
+```bash
+# Hooks run automatically on commit
+git commit -m "feat: add new feature"
+
+# Run manually
+npm run type-check && npm run test:ci
+```
 
 ---
 
