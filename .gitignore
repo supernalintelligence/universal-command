@@ -45,3 +45,6 @@ pnpm-debug.log*
 .turbo
 .cache
 *.tgz
+
+# Worktrees (Multi-Agent Development)
+.worktrees/
