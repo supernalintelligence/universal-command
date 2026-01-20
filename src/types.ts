@@ -8,17 +8,47 @@
 export interface ExecutionContext {
   /** Which interface is executing the command */
   interface: 'cli' | 'api' | 'mcp' | 'test';
-  
+
   /** Project root directory (if applicable) */
   projectRoot?: string;
-  
+
   /** API-specific: HTTP request object */
   request?: any; // NextRequest | Request
-  
+
   /** CLI-specific: Output streams (or any writable stream for testing) */
   stdout?: NodeJS.WriteStream | NodeJS.WritableStream;
   stderr?: NodeJS.WriteStream | NodeJS.WritableStream;
-  
+
+  /**
+   * Streaming output support (P0-4)
+   * Use for large datasets to avoid OOM errors
+   */
+  stream?: NodeJS.WritableStream;
+
+  /**
+   * CLI input stream (P0-5)
+   * For reading user input, pipes, etc.
+   */
+  stdin?: NodeJS.ReadStream | NodeJS.ReadableStream;
+
+  /**
+   * Whether running in interactive TTY (P0-5)
+   * Use to determine if prompts/colors are appropriate
+   */
+  isTTY?: boolean;
+
+  /**
+   * Prompt function for interactive input (P0-5)
+   * Example: const name = await context.prompt('Enter name:')
+   */
+  prompt?: (message: string, options?: { default?: string; mask?: boolean }) => Promise<string>;
+
+  /**
+   * Pass-through options from CLI (P0-6)
+   * Options after '--' that weren't recognized
+   */
+  passThroughOptions?: string[];
+
   /** Additional context data */
   [key: string]: any;
 }
@@ -29,36 +59,56 @@ export interface ExecutionContext {
 export interface Parameter {
   /** Parameter name */
   name: string;
-  
+
   /** Parameter type */
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  
+
   /** Human-readable description */
   description: string;
-  
+
   /** Whether parameter is required */
   required?: boolean;
-  
+
   /** Default value if not provided */
   default?: any;
-  
+
   /** Allowed values (enum) */
   enum?: any[];
-  
+
   /** Minimum value (for numbers) */
   min?: number;
-  
+
   /** Maximum value (for numbers) */
   max?: number;
-  
+
   /** Regex pattern (for strings) */
   pattern?: string;
-  
+
   /** Item schema (for arrays) */
   items?: Parameter;
-  
+
   /** Properties (for objects) */
   properties?: Record<string, Parameter>;
+
+  /**
+   * Whether this parameter is positional (not a --flag) (P0-2)
+   * Positional args appear as: sc command <arg1> <arg2> instead of --arg1 value
+   */
+  positional?: boolean;
+
+  /**
+   * Whether this parameter accepts multiple values (variadic) (P0-2)
+   * Example: sc command <files...> accepts one or more file paths
+   * Requires positional: true
+   */
+  variadic?: boolean;
+
+  /**
+   * Position index for positional arguments (P0-2)
+   * 0-based. If omitted, uses order in parameters array
+   * Only relevant when positional: true
+   */
+  position?: number;
 }
 
 /**
@@ -66,16 +116,38 @@ export interface Parameter {
  */
 export interface CLIOptions {
   /** Custom output formatter */
-  format?: (result: any) => string;
-  
+  format?: (result: any, args?: any) => string;
+
   /** Enable streaming output */
   streaming?: boolean;
-  
+
   /** Show progress indicator */
   progress?: boolean;
-  
+
   /** Command aliases */
   aliases?: string[];
+
+  /** Usage examples for help text */
+  examples?: string[];
+
+  /**
+   * Command path for nested subcommands (P0-1)
+   * Example: ['git', 'worktree', 'merge'] creates: sc git worktree merge
+   * If omitted, uses schema.name split by spaces
+   */
+  path?: string[];
+
+  /**
+   * Allow unknown options to pass through (P0-6)
+   * Enables: sc command --known-flag -- --unknown-flag
+   */
+  allowUnknownOption?: boolean;
+
+  /**
+   * Pass through unknown options to handler (P0-6)
+   * When true, options after '--' are available in context.passThroughOptions
+   */
+  passThroughOptions?: boolean;
 }
 
 /**
@@ -84,20 +156,20 @@ export interface CLIOptions {
 export interface APIOptions {
   /** HTTP method (default: inferred from handler) */
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
-  
+
   /** Cache control settings */
   cacheControl?: {
     maxAge?: number;
     staleWhileRevalidate?: number;
     revalidate?: number;
   };
-  
+
   /** Rate limiting */
   rateLimit?: {
     requests: number;
     window: string; // e.g., '1m', '1h'
   };
-  
+
   /** Authentication requirements */
   auth?: {
     required: boolean;
