@@ -109,6 +109,12 @@ export interface Parameter {
    * Only relevant when positional: true
    */
   position?: number;
+
+  /**
+   * Short aliases for this parameter (P1 feature)
+   * Example: ['v'] for --verbose/-v
+   */
+  aliases?: string[];
 }
 
 /**

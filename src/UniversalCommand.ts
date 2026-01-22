@@ -1,6 +1,6 @@
 /**
  * Core UniversalCommand class
- * 
+ *
  * Defines a command once and generates CLI, API, and MCP interfaces automatically.
  */
 
@@ -10,7 +10,7 @@ import type {
   ValidationResult,
   MCPToolDefinition,
   NextAPIRoute,
-  Parameter
+  Parameter,
 } from './types';
 import { ValidationError } from './errors';
 
@@ -41,10 +41,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     // Validate input
     const validation = this.validateArgs(args);
     if (!validation.valid) {
-      throw new ValidationError(
-        'Invalid command arguments',
-        validation.errors || []
-      );
+      throw new ValidationError('Invalid command arguments', validation.errors || []);
     }
 
     // Execute handler
@@ -65,7 +62,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       if (param.required && (value === undefined || value === null)) {
         errors.push({
           path: param.name,
-          message: `Parameter '${param.name}' is required`
+          message: `Parameter '${param.name}' is required`,
         });
         continue;
       }
@@ -86,7 +83,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       if (!typeValid.valid) {
         errors.push({
           path: param.name,
-          message: typeValid.error || 'Invalid type'
+          message: typeValid.error || 'Invalid type',
         });
         continue;
       }
@@ -95,7 +92,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       if (param.enum && !param.enum.includes(value)) {
         errors.push({
           path: param.name,
-          message: `Value must be one of: ${param.enum.join(', ')}`
+          message: `Value must be one of: ${param.enum.join(', ')}`,
         });
         continue;
       }
@@ -105,14 +102,14 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         if (param.min !== undefined && value < param.min) {
           errors.push({
             path: param.name,
-            message: `Value must be >= ${param.min}`
+            message: `Value must be >= ${param.min}`,
           });
           continue;
         }
         if (param.max !== undefined && value > param.max) {
           errors.push({
             path: param.name,
-            message: `Value must be <= ${param.max}`
+            message: `Value must be <= ${param.max}`,
           });
           continue;
         }
@@ -124,7 +121,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         if (!regex.test(value)) {
           errors.push({
             path: param.name,
-            message: `Value does not match pattern: ${param.pattern}`
+            message: `Value does not match pattern: ${param.pattern}`,
           });
           continue;
         }
@@ -143,10 +140,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   /**
    * Validate value type
    */
-  private validateType(
-    value: any,
-    param: Parameter
-  ): { valid: boolean; error?: string } {
+  private validateType(value: any, param: Parameter): { valid: boolean; error?: string } {
     switch (param.type) {
       case 'string':
         if (typeof value !== 'string') {
@@ -183,12 +177,13 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   }
 
   /**
-   * Generate Commander.js CLI command
+   * Generate Commander.js CLI command (P0-1: Subcommand trees, P0-2: Positional args)
    */
   toCLI(): any {
     // Lazy load commander to avoid hard dependency
     let Command: any;
     try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       Command = require('commander').Command;
     } catch {
       throw new Error(
@@ -196,11 +191,50 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       );
     }
 
-    const cmd = new Command(this.schema.name);
+    // Determine command path (P0-1)
+    const commandPath = this.schema.cli?.path || this.schema.name.split(' ');
+    const commandName = commandPath[commandPath.length - 1];
+
+    // Create the leaf command
+    const cmd = new Command(commandName);
     cmd.description(this.schema.description);
 
-    // Add parameters as options
-    for (const param of this.schema.input.parameters) {
+    // P0-6: Enable pass-through options if requested
+    if (this.schema.cli?.allowUnknownOption) {
+      cmd.allowUnknownOption();
+    }
+    if (this.schema.cli?.passThroughOptions) {
+      cmd.passThroughOptions();
+    }
+
+    // Separate positional from option parameters (P0-2)
+    const positionalParams = this.schema.input.parameters
+      .filter((p) => p.positional)
+      .sort((a, b) => {
+        const posA = a.position !== undefined ? a.position : Infinity;
+        const posB = b.position !== undefined ? b.position : Infinity;
+        return posA - posB;
+      });
+
+    const optionParams = this.schema.input.parameters.filter((p) => !p.positional);
+
+    // Add positional arguments (P0-2)
+    for (const param of positionalParams) {
+      let argSyntax = param.name;
+
+      if (param.variadic) {
+        // Variadic: <files...>
+        argSyntax = param.required ? `<${param.name}...>` : `[${param.name}...]`;
+      } else {
+        // Regular positional: <file>
+        argSyntax = param.required ? `<${param.name}>` : `[${param.name}]`;
+      }
+
+      cmd.argument(argSyntax, param.description, param.default);
+    }
+
+    // Add option parameters
+    for (const param of optionParams) {
       const flags = param.required
         ? `--${param.name} <${param.name}>`
         : `--${param.name} [${param.name}]`;
@@ -220,13 +254,75 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     }
 
     // Wire up action handler
-    cmd.action(async (options: any) => {
+    // Commander passes positional args first, then options object
+    cmd.action(async (...actionArgs: any[]) => {
       try {
-        const result = await this.execute(options, {
+        // Extract positional args and options
+        // Last argument is the command object, second-to-last is options
+        const cmdObj = actionArgs[actionArgs.length - 1];
+        const options = actionArgs[actionArgs.length - 2];
+        const positionalValues = actionArgs.slice(0, actionArgs.length - 2);
+
+        // Merge positional args with options
+        const args: any = { ...options };
+        for (let i = 0; i < positionalParams.length; i++) {
+          const param = positionalParams[i];
+          if (i < positionalValues.length) {
+            args[param.name] = positionalValues[i];
+          }
+        }
+
+        // Build execution context (P0-4, P0-5, P0-6)
+        const context: ExecutionContext = {
           interface: 'cli',
           stdout: process.stdout,
-          stderr: process.stderr
-        });
+          stderr: process.stderr,
+          stdin: process.stdin,
+          isTTY: process.stdout.isTTY,
+        };
+
+        // Add streaming support if enabled (P0-4)
+        if (this.schema.cli?.streaming) {
+          context.stream = process.stdout;
+        }
+
+        // Add prompt function if TTY (P0-5)
+        if (context.isTTY) {
+          context.prompt = async (
+            message: string,
+            options?: { default?: string; mask?: boolean }
+          ) => {
+            // Simple readline-based prompt
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const readline = require('readline');
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+            });
+
+            return new Promise<string>((resolve) => {
+              const promptText = options?.default
+                ? `${message} [${options.default}]: `
+                : `${message}: `;
+
+              rl.question(promptText, (answer: string) => {
+                rl.close();
+                resolve(answer || options?.default || '');
+              });
+            });
+          };
+        }
+
+        // Add pass-through options if enabled (P0-6)
+        if (this.schema.cli?.passThroughOptions && cmdObj.args) {
+          // Find '--' separator and capture everything after
+          const separatorIndex = process.argv.indexOf('--');
+          if (separatorIndex !== -1) {
+            context.passThroughOptions = process.argv.slice(separatorIndex + 1);
+          }
+        }
+
+        const result = await this.execute(args, context);
 
         // Format output
         if (this.schema.cli?.format) {
@@ -238,11 +334,78 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         }
       } catch (error: any) {
         console.error('Error:', error.message);
-        process.exit(error.details?.status || 1);
+
+        // P1-7: Use proper exit code mapping
+        const exitCode = error.getExitCode
+          ? error.getExitCode()
+          : (error.details?.exitCode ?? error.details?.status ?? 1);
+        process.exit(exitCode);
       }
     });
 
     return cmd;
+  }
+
+  /**
+   * Build nested subcommand tree (P0-1)
+   * Given a command path like ['git', 'worktree', 'merge'], creates:
+   * sc git worktree merge (not sc git <worktree> <merge>)
+   */
+  static buildCommandTree(commands: UniversalCommand[]): any {
+    let Command: any;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      Command = require('commander').Command;
+    } catch {
+      throw new Error('commander package is required. Install with: npm install commander');
+    }
+
+    // Build tree structure
+    const tree: Map<string, any> = new Map();
+
+    for (const command of commands) {
+      const path = command.schema.cli?.path || command.schema.name.split(' ');
+
+      // Navigate/create tree
+      let current: any = null;
+      let parentKey = '';
+
+      for (let i = 0; i < path.length - 1; i++) {
+        const segment = path[i];
+        const key = parentKey ? `${parentKey}.${segment}` : segment;
+
+        if (!tree.has(key)) {
+          const subCmd = new Command(segment);
+          tree.set(key, subCmd);
+
+          // Add to parent
+          if (current) {
+            current.addCommand(subCmd);
+          }
+        }
+
+        current = tree.get(key);
+        parentKey = key;
+      }
+
+      // Add leaf command
+      const leafCmd = command.toCLI();
+      if (current) {
+        current.addCommand(leafCmd);
+      } else {
+        tree.set(path[0], leafCmd);
+      }
+    }
+
+    // Return root commands
+    const roots: any[] = [];
+    for (const [key, cmd] of tree.entries()) {
+      if (!key.includes('.')) {
+        roots.push(cmd);
+      }
+    }
+
+    return roots;
   }
 
   /**
@@ -259,15 +422,14 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Execute command
         const result = await this.execute(args, {
           interface: 'api',
-          request
+          request,
         });
 
         // Create response
-        let Response: any;
         let NextResponse: any;
         try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
           NextResponse = require('next/server').NextResponse;
-          Response = globalThis.Response;
         } catch {
           throw new Error(
             'next package is required for API generation. Install with: npm install next'
@@ -282,7 +444,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           const cacheHeader = [
             maxAge !== undefined && `max-age=${maxAge}`,
             staleWhileRevalidate !== undefined && `stale-while-revalidate=${staleWhileRevalidate}`,
-            revalidate !== undefined && `s-maxage=${revalidate}`
+            revalidate !== undefined && `s-maxage=${revalidate}`,
           ]
             .filter(Boolean)
             .join(', ');
@@ -296,16 +458,14 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       } catch (error: any) {
         let NextResponse: any;
         try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
           NextResponse = require('next/server').NextResponse;
         } catch {
           // Fallback to basic Response
-          return new Response(
-            JSON.stringify({ error: error.message }),
-            {
-              status: error.details?.status || 500,
-              headers: { 'Content-Type': 'application/json' }
-            }
-          );
+          return new Response(JSON.stringify({ error: error.message }), {
+            status: error.details?.status || 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
 
         return NextResponse.json(
@@ -363,7 +523,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       case 'boolean':
         return value === 'true' || value === '1';
       case 'array':
-        return value.split(',').map(s => s.trim());
+        return value.split(',').map((s) => s.trim());
       default:
         return value;
     }
@@ -374,8 +534,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
    */
   toMCP(): MCPToolDefinition {
     const toolName =
-      this.schema.mcp?.toolName ||
-      `sc_${this.schema.name.replace(/\s+/g, '_').toLowerCase()}`;
+      this.schema.mcp?.toolName || `sc_${this.schema.name.replace(/\s+/g, '_').toLowerCase()}`;
 
     return {
       name: toolName,
@@ -389,21 +548,21 @@ export class UniversalCommand<TInput = any, TOutput = any> {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2)
-              }
-            ]
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
           };
         } catch (error: any) {
           return {
             content: [
               {
                 type: 'text',
-                text: `Error: ${error.message}`
-              }
-            ]
+                text: `Error: ${error.message}`,
+              },
+            ],
           };
         }
-      }
+      },
     };
   }
 
@@ -425,7 +584,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     return {
       type: 'object',
       properties,
-      ...(required.length > 0 && { required })
+      ...(required.length > 0 && { required }),
     };
   }
 
@@ -435,7 +594,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   private parameterToJSONSchema(param: Parameter): any {
     const schema: any = {
       type: param.type,
-      description: param.description
+      description: param.description,
     };
 
     if (param.default !== undefined) {
@@ -463,7 +622,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       schema.properties = Object.fromEntries(
         Object.entries(param.properties).map(([key, prop]) => [
           key,
-          this.parameterToJSONSchema(prop)
+          this.parameterToJSONSchema(prop),
         ])
       );
     }
@@ -483,10 +642,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
    * Get the MCP tool name
    */
   getMCPToolName(): string {
-    return (
-      this.schema.mcp?.toolName ||
-      `sc_${this.schema.name.replace(/\s+/g, '_').toLowerCase()}`
-    );
+    return this.schema.mcp?.toolName || `sc_${this.schema.name.replace(/\s+/g, '_').toLowerCase()}`;
   }
 
   /**
@@ -494,7 +650,6 @@ export class UniversalCommand<TInput = any, TOutput = any> {
    * Useful for discovery and debugging
    */
   describe(): CommandDescription {
-    const cliName = this.schema.name.replace(/\s+/g, '-');
     const apiPath = '/' + this.getAPIRoutePath();
     const mcpTool = this.getMCPToolName();
 
@@ -508,34 +663,34 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       interfaces: {
         cli: {
           command: `sc ${this.schema.name}`,
-          aliases: this.schema.cli?.aliases?.map(a => `sc ${a}`) || [],
-          options: this.schema.input.parameters.map(p => ({
+          aliases: this.schema.cli?.aliases?.map((a) => `sc ${a}`) || [],
+          options: this.schema.input.parameters.map((p) => ({
             flag: `--${p.name}`,
             description: p.description,
             required: p.required || false,
             default: p.default,
-            type: p.type
-          }))
+            type: p.type,
+          })),
         },
         api: {
           method: this.schema.api?.method || 'GET',
           path: apiPath,
-          cacheControl: this.schema.api?.cacheControl
+          cacheControl: this.schema.api?.cacheControl,
         },
         mcp: {
           toolName: mcpTool,
-          inputSchema: this.parametersToJSONSchema()
-        }
+          inputSchema: this.parametersToJSONSchema(),
+        },
       },
 
-      parameters: this.schema.input.parameters.map(p => ({
+      parameters: this.schema.input.parameters.map((p) => ({
         name: p.name,
         type: p.type,
         description: p.description,
         required: p.required || false,
         default: p.default,
-        enum: p.enum
-      }))
+        enum: p.enum,
+      })),
     };
   }
 
