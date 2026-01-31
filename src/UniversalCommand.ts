@@ -235,11 +235,15 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
     // Add option parameters
     for (const param of optionParams) {
-      const flags = param.required
-        ? `--${param.name} <${param.name}>`
-        : `--${param.name} [${param.name}]`;
+      // Boolean flags don't take values - just --flag (not --flag [value])
+      const isBoolean = param.type === 'boolean';
+      const flags = isBoolean
+        ? `--${param.name}`
+        : param.required
+          ? `--${param.name} <${param.name}>`
+          : `--${param.name} [${param.name}]`;
 
-      if (param.required) {
+      if (param.required && !isBoolean) {
         cmd.requiredOption(flags, param.description);
       } else {
         cmd.option(flags, param.description, param.default);
