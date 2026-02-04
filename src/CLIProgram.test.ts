@@ -10,7 +10,7 @@ import type { CLIHooks } from './CLIProgram';
 describe('P1-8: Global Options and Hooks', () => {
   describe('Global Options', () => {
     it('should create CLI program with global options', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -37,7 +37,7 @@ describe('P1-8: Global Options and Hooks', () => {
     });
 
     it('should register global options on program', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -59,7 +59,7 @@ describe('P1-8: Global Options and Hooks', () => {
     });
 
     it('should support required global options', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -82,7 +82,7 @@ describe('P1-8: Global Options and Hooks', () => {
     });
 
     it('should support short flags for global options', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -106,7 +106,7 @@ describe('P1-8: Global Options and Hooks', () => {
 
   describe('Command Registration', () => {
     it('should register UniversalCommand with program', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -130,7 +130,7 @@ describe('P1-8: Global Options and Hooks', () => {
     });
 
     it('should register multiple commands at once', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -167,13 +167,11 @@ describe('P1-8: Global Options and Hooks', () => {
     it('should support beforeCommand hook', async () => {
       const hooks: CLIHooks = {
         beforeCommand: async (_commandName, _args, _context) => {
-          hookCalled = true;
-          hookCommandName = commandName;
-          hookArgs = args;
+          // Hook would be called during execution
         },
       };
 
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',
@@ -262,7 +260,7 @@ describe('P1-8: Global Options and Hooks', () => {
 
   describe('Integration', () => {
     it('should create full CLI program with all features', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'sc',
         description: 'Supernal Coding CLI',
         version: '1.0.0',
@@ -287,15 +285,11 @@ describe('P1-8: Global Options and Hooks', () => {
           },
         ],
         hooks: {
-          beforeCommand: async (commandName, args, _context) => {
-            if (context.globalOptions?.verbose) {
-              console.log(`Executing: ${commandName}`);
-            }
+          beforeCommand: async (_commandName, _args, _context) => {
+            // Hook would log during actual execution
           },
-          afterCommand: async (commandName, result, _context) => {
-            if (context.globalOptions?.verbose) {
-              console.log(`Completed: ${commandName}`);
-            }
+          afterCommand: async (_commandName, _result, _context) => {
+            // Hook would log during actual execution
           },
           onError: async (commandName, error, _context) => {
             console.error(`Error in ${commandName}:`, error.message);
@@ -339,7 +333,7 @@ describe('P1-8: Global Options and Hooks', () => {
     });
 
     it('should support method chaining', () => {
-      createCLIProgram({
+      const program = createCLIProgram({
         name: 'test-cli',
         description: 'Test CLI',
         version: '1.0.0',

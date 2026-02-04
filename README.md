@@ -1,5 +1,10 @@
 # @supernal/universal-command
 
+[![npm version](https://img.shields.io/npm/v/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
+[![npm downloads](https://img.shields.io/npm/dm/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
+
 **Universal Command Abstraction for CLI, API, and MCP**
 
 Define your command once, deploy it everywhere.
@@ -826,6 +831,40 @@ git commit -m "feat: add new feature"
 
 # Run manually
 npm run type-check && npm run test:ci
+```
+
+---
+
+## Publishing to npm
+
+### For Maintainers
+
+```bash
+# Ensure you're logged in to npm
+npm login
+
+# Run tests and build
+pnpm test:ci
+pnpm build
+
+# Publish (prepublishOnly will run automatically)
+npm publish
+
+# Or publish a beta version
+npm publish --tag beta
+```
+
+### Version Bumping
+
+```bash
+# Patch release (0.1.0 -> 0.1.1)
+npm version patch
+
+# Minor release (0.1.0 -> 0.2.0)
+npm version minor
+
+# Major release (0.1.0 -> 1.0.0)
+npm version major
 ```
 
 ---
