@@ -7,7 +7,11 @@
  * - Nested command registration
  */
 
+import { createRequire } from 'node:module';
 import { UniversalCommand } from './UniversalCommand';
+
+// Create a require function that works in both ESM and CJS contexts
+const require = createRequire(import.meta.url);
 import type { ExecutionContext } from './types';
 
 /**

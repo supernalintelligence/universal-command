@@ -4,6 +4,7 @@
  * Defines a command once and generates CLI, API, and MCP interfaces automatically.
  */
 
+import { createRequire } from 'node:module';
 import type {
   CommandSchema,
   ExecutionContext,
@@ -13,6 +14,9 @@ import type {
   Parameter,
 } from './types';
 import { ValidationError } from './errors';
+
+// Create a require function that works in both ESM and CJS contexts
+const require = createRequire(import.meta.url);
 
 export class UniversalCommand<TInput = any, TOutput = any> {
   constructor(public readonly schema: CommandSchema<TInput, TOutput>) {

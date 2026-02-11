@@ -5,7 +5,11 @@
  * plugin-based generator system internally.
  */
 
+import { createRequire } from 'node:module';
 import { CommandRegistry } from '../CommandRegistry';
+
+// Create a require function that works in both ESM and CJS contexts
+const require = createRequire(import.meta.url);
 import {
   NextRoutesGenerator,
   MCPServerGenerator,
