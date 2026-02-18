@@ -330,7 +330,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
         // Format output
         if (this.schema.cli?.format) {
-          console.log(this.schema.cli.format(result));
+          console.log(this.schema.cli.format(result, args));
         } else if (this.schema.output.type === 'json') {
           console.log(JSON.stringify(result, null, 2));
         } else {

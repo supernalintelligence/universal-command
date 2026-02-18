@@ -30,3 +30,9 @@ export type { RuntimeAPIConfig, RuntimeMCPConfig } from './runtime';
 // Scope-based registry (O(1) keyed lookup, semantic namespaces)
 export { ScopeRegistry, createScopeRegistry } from './scopes';
 export type { Scope, ScopeOptions } from './scopes';
+
+// Modal agent commands
+export { modalSpawnCommand, modalProvisionCommand, modalStatusCommand } from './commands/modal';
+
+// System commands (operations/infrastructure)
+export { systemServicesCommand } from './commands/system';
