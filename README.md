@@ -1,130 +1,89 @@
+<div align="center">
+
 # @supernal/universal-command
 
 [![npm version](https://img.shields.io/npm/v/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
 [![npm downloads](https://img.shields.io/npm/dm/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen.svg)](https://github.com/supernalintelligence/universal-command/actions)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Universal Command Abstraction for CLI, API, and MCP**
+**Define your command once. Deploy it to CLI, API, and MCP automatically.**
 
-Define your command once, deploy it everywhere.
+[📦 npm](https://www.npmjs.com/package/@supernal/universal-command) ·
+[📖 Docs](#api-reference) ·
+[🐛 Issues](https://github.com/supernalintelligence/universal-command/issues)
+
+</div>
 
 ---
 
 ## The Problem
 
-Building a command-line tool with API and AI integration requires maintaining three separate implementations:
+Building tools for the AI age means maintaining **three separate implementations**:
 
-```typescript
-// CLI (Commander.js)
-program.command('requirement list')
-  .option('--status <status>')
-  .action(async (options) => { /* implementation */ });
+- **CLI** — Commander.js schema + handler + output formatting
+- **API** — Next.js/Express schema + handler + auth + caching
+- **MCP** — `@modelcontextprotocol/sdk` schema + handler + capabilities
 
-// API (Next.js)
-export async function GET(request: NextRequest) {
-  const status = request.nextUrl.searchParams.get('status');
-  // duplicate implementation
-}
+That's 3× the code, 3× the tests, and inevitable drift between interfaces.
 
-// MCP (Model Context Protocol)
-{
-  name: 'requirement_list',
-  inputSchema: { /* duplicate schema */ },
-  handler: async (args) => { /* duplicate implementation */ }
-}
-```
-
-**Result**: 3x maintenance burden, drift risk, duplicated logic.
+**Universal Command** solves this: define your command once, generate all three.
 
 ---
 
-## The Solution
+## Why Universal Command?
 
-Define once, deploy everywhere:
+| Feature              | Universal Command          | Manual Implementation     |
+| -------------------- | -------------------------- | ------------------------- |
+| **Maintenance**      | Define once                | Define 3× (CLI/API/MCP)   |
+| **Drift risk**       | None (single source)       | High (separate codebases) |
+| **Type safety**      | Full TypeScript            | Varies by interface       |
+| **Validation**       | Automatic                  | Manual per interface      |
+| **Testing**          | Test handler once          | Test 3×                   |
+| **Feature velocity** | Add once, works everywhere | Add 3×                    |
+
+---
+
+## Quick Example
 
 ```typescript
 import { UniversalCommand } from '@supernal/universal-command';
 
-export const requirementList = new UniversalCommand({
-  name: 'requirement list',
-  description: 'List all requirements',
-
+const userCreate = new UniversalCommand({
+  name: 'user create',
+  description: 'Create a new user',
   input: {
     parameters: [
-      {
-        name: 'status',
-        type: 'string',
-        description: 'Filter by status',
-        enum: ['draft', 'in-progress', 'done'],
-      },
+      { name: 'name', type: 'string', required: true, description: 'User name' },
+      { name: 'email', type: 'string', required: true, description: 'User email' },
+      { name: 'role', type: 'string', default: 'user', enum: ['user', 'admin'] },
     ],
   },
-
-  // Single handler works everywhere
-  handler: async (args, context) => {
-    return await fetchRequirements({ status: args.status });
-  },
-
-  // Optional: CLI-specific formatting
-  cli: {
-    format: (results) => results.map((r) => `${r.id}: ${r.title}`).join('\n'),
-  },
+  handler: async (args) => createUser(args),
 });
+
+// CLI  →  mycli user create --name Alice --email alice@example.com
+const cli = userCreate.toCLI(); // Commander.Command
+
+// API  →  POST /api/users/create
+export const POST = userCreate.toNextAPI(); // Next.js route handler
+
+// MCP  →  Claude / Cursor / Zed tool call
+const tool = userCreate.toMCP(); // MCP tool definition
 ```
 
-**Deploy automatically**:
-
-```typescript
-// Generate CLI
-const program = requirementList.toCLI();
-
-// Generate Next.js API
-export const GET = requirementList.toNextAPI();
-
-// Generate MCP tool
-const mcpTool = requirementList.toMCP();
-```
+**One definition. Three interfaces. Zero drift.**
 
 ---
 
-## Features
+## The MCP Moment
 
-### 🎯 **Single Source of Truth**
+The Model Context Protocol is rapidly becoming the standard way AI agents invoke tools. Claude, Cursor, Zed, and a growing ecosystem already support it. Every developer tool needs an MCP interface — and that number is only going up.
 
-- Define command logic once
-- CLI, API, MCP stay in sync automatically
-- No duplication, no drift
+> 🔗 [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — Your tool is one definition away from being listed here.
 
-### 🚀 **Zero Overhead**
-
-- Thin wrappers around your handler
-- No performance penalty
-- Direct function calls
-
-### 🔧 **Framework Agnostic**
-
-- Bring your own handler implementation
-- Works with any framework
-- No vendor lock-in
-
-### 📦 **Interface-Specific Overrides**
-
-- CLI: Custom formatting, progress bars
-- API: Caching, rate limiting, auth
-- MCP: Resource links, capabilities
-
-### 🛡️ **Type Safe**
-
-- Full TypeScript support
-- Input/output validation
-- Compile-time error detection
-
-### 🧪 **Testable**
-
-- Test handler once, works everywhere
-- Mock context for testing
-- Integration test helpers
+With Universal Command, adding MCP support to an existing CLI takes **one line**. No separate schema. No duplicate handler. No drift.
 
 ---
 
@@ -134,55 +93,32 @@ const mcpTool = requirementList.toMCP();
 npm install @supernal/universal-command
 ```
 
-**Peer dependencies**:
+Install peer dependencies for the interfaces you need:
 
 ```bash
-# For CLI generation
-npm install commander
-
-# For Next.js API generation
-npm install next
-
-# For MCP generation
-npm install @modelcontextprotocol/sdk
+npm install commander                    # CLI
+npm install next                         # Next.js API
+npm install @modelcontextprotocol/sdk    # MCP
 ```
 
 ---
 
-## Quick Start
+## Core Usage
 
-### 1. Define Your Command
+### Define your command
 
 ```typescript
-// commands/user-create.ts
 import { UniversalCommand } from '@supernal/universal-command';
 
-export const userCreate = new UniversalCommand({
-  name: 'user create',
-  description: 'Create a new user',
-  category: 'users',
+export const issueCreate = new UniversalCommand({
+  name: 'issue create',
+  description: 'Create a GitHub issue',
 
   input: {
     parameters: [
-      {
-        name: 'name',
-        type: 'string',
-        description: 'User name',
-        required: true,
-      },
-      {
-        name: 'email',
-        type: 'string',
-        description: 'User email',
-        required: true,
-      },
-      {
-        name: 'role',
-        type: 'string',
-        description: 'User role',
-        default: 'user',
-        enum: ['user', 'admin'],
-      },
+      { name: 'title', type: 'string', required: true },
+      { name: 'body', type: 'string' },
+      { name: 'labels', type: 'array', items: { type: 'string' } },
     ],
   },
 
@@ -190,120 +126,94 @@ export const userCreate = new UniversalCommand({
     type: 'json',
     schema: {
       type: 'object',
-      properties: {
-        id: { type: 'string' },
-        name: { type: 'string' },
-        email: { type: 'string' },
-      },
+      properties: { id: { type: 'number' }, url: { type: 'string' } },
     },
   },
 
-  handler: async (args, context) => {
-    // Your implementation
-    const user = await createUser({
-      name: args.name,
-      email: args.email,
-      role: args.role,
+  handler: async (args) => {
+    return await octokit.issues.create({
+      owner: 'org',
+      repo: 'repo',
+      title: args.title,
+      body: args.body,
+      labels: args.labels,
     });
-
-    return user;
   },
 });
 ```
 
-### 2. Generate CLI
+### Deploy to CLI
 
 ```typescript
 // cli.ts
 import { Command } from 'commander';
-import { userCreate } from './commands/user-create';
+import { issueCreate } from './commands/issue-create';
 
 const program = new Command();
-program.addCommand(userCreate.toCLI());
+program.addCommand(issueCreate.toCLI());
 program.parse();
 ```
 
 ```bash
-$ mycli user create --name "Alice" --email "alice@example.com"
-Created user: alice@example.com (ID: user-123)
+$ mytool issue create --title "Bug: login fails" --labels bug,urgent
 ```
 
-### 3. Generate Next.js API
+### Deploy to Next.js API
 
 ```typescript
-// app/api/users/create/route.ts
-import { userCreate } from '@/commands/user-create';
+// app/api/issues/create/route.ts
+import { issueCreate } from '@/commands/issue-create';
 
-export const POST = userCreate.toNextAPI();
+export const POST = issueCreate.toNextAPI();
 ```
 
 ```bash
-$ curl -X POST https://api.example.com/users/create \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Alice","email":"alice@example.com"}'
-
-{"id":"user-123","name":"Alice","email":"alice@example.com"}
+$ curl -X POST /api/issues/create \
+    -d '{"title":"Bug: login fails","labels":["bug","urgent"]}'
 ```
 
-### 4. Generate MCP Tool
+### Deploy to MCP
 
 ```typescript
 // mcp-server.ts
 import { Server } from '@modelcontextprotocol/sdk/server';
-import { userCreate } from './commands/user-create';
+import { issueCreate } from './commands/issue-create';
 
 const server = new Server({ name: 'my-mcp-server' });
 
 server.setRequestHandler('tools/list', async () => ({
-  tools: [userCreate.toMCP()],
+  tools: [issueCreate.toMCP()],
 }));
 
 server.setRequestHandler('tools/call', async (request) => {
-  if (request.params.name === 'user_create') {
-    return await userCreate.executeMCP(request.params.arguments);
+  if (request.params.name === 'issue_create') {
+    return await issueCreate.executeMCP(request.params.arguments);
   }
 });
 ```
 
 ---
 
-## Advanced Usage
+## Interface-Specific Overrides
 
-### Interface-Specific Options
+Each interface can be customized without touching the shared handler:
 
 ```typescript
 new UniversalCommand({
   name: 'data export',
-  // ... base definition ...
+  // ...
 
-  // CLI-specific
   cli: {
-    format: (data) => {
-      // Custom formatting for terminal
-      return JSON.stringify(data, null, 2);
-    },
-    streaming: true, // Support streaming output
-    progress: true, // Show progress bar
+    format: (data) => JSON.stringify(data, null, 2),
+    streaming: true,
   },
 
-  // API-specific
   api: {
-    method: 'GET', // Default: infer from handler
-    cacheControl: {
-      maxAge: 300,
-      staleWhileRevalidate: 60,
-    },
-    rateLimit: {
-      requests: 100,
-      window: '1m',
-    },
-    auth: {
-      required: true,
-      roles: ['admin'],
-    },
+    method: 'GET',
+    cacheControl: { maxAge: 300, staleWhileRevalidate: 60 },
+    auth: { required: true, roles: ['admin'] },
   },
 
-  // MCP-specific
   mcp: {
     resourceLinks: ['export://results'],
     capabilities: ['streaming'],
@@ -311,328 +221,161 @@ new UniversalCommand({
 });
 ```
 
-### Execution Context
+---
 
-The `context` parameter provides interface-specific information:
+## Execution Context
+
+The handler receives a `context` object with interface-specific info:
 
 ```typescript
 handler: async (args, context) => {
-  switch (context.interface) {
-    case 'cli':
-      // CLI-specific logic
-      console.log('Running from CLI');
-      break;
+  if (context.interface === 'cli') {
+    console.log('Running from terminal');
+  }
 
-    case 'api':
-      // Access request object
-      const userId = context.request.headers.get('x-user-id');
-      break;
-
-    case 'mcp':
-      // MCP-specific logic
-      break;
+  if (context.interface === 'api') {
+    const userId = context.request.headers.get('x-user-id');
   }
 
   return result;
 };
 ```
 
-### Validation
+---
 
-Input validation is automatic based on parameter definitions:
+## Error Handling
 
-```typescript
-input: {
-  parameters: [
-    {
-      name: 'age',
-      type: 'number',
-      required: true,
-      min: 0,
-      max: 120,
-    },
-    {
-      name: 'email',
-      type: 'string',
-      required: true,
-      pattern: '^[^@]+@[^@]+\\.[^@]+$',
-    },
-  ];
-}
-```
-
-### Error Handling
+Throw a `CommandError` — it's automatically formatted for each interface:
 
 ```typescript
-handler: async (args, context) => {
+import { CommandError } from '@supernal/universal-command';
+
+handler: async (args) => {
   if (!isValid(args.email)) {
-    throw new CommandError('Invalid email address', { code: 'INVALID_EMAIL', status: 400 });
+    throw new CommandError('Invalid email', { code: 'INVALID_EMAIL', status: 400 });
   }
-
   return result;
 };
 ```
 
-Errors are automatically formatted for each interface:
-
-- **CLI**: Formatted error message with exit code
-- **API**: JSON error response with status code
+- **CLI**: Human-readable message + non-zero exit code
+- **API**: `{ error: ... }` JSON with HTTP status
 - **MCP**: MCP error format
 
 ---
 
-## Runtime Registration (No Code Generation)
+## Runtime Server
 
-For the simplest setup, use `RuntimeServer` to register commands and serve them directly:
+Register multiple commands and serve them all at once:
 
 ```typescript
 import { createRuntimeServer } from '@supernal/universal-command';
 
 const server = createRuntimeServer();
-
-// Register commands
 server.register(userCreate);
-server.register(userList);
-server.register(userDelete);
-
-// Or define inline
-server.command({
-  name: 'health check',
-  description: 'Check system health',
-  input: { parameters: [] },
-  output: { type: 'json' },
-  handler: async () => ({ status: 'ok' }),
-});
+server.register(issueCreate);
 ```
 
-### Serve as Next.js API
+### Next.js (catch-all route)
 
 ```typescript
 // app/api/[...path]/route.ts
-import { createServer } from '@/lib/commands';
-
 const server = createServer();
 const handlers = server.getNextHandlers();
-
 export const GET = handlers.GET;
 export const POST = handlers.POST;
-export const PUT = handlers.PUT;
-export const DELETE = handlers.DELETE;
 ```
 
-### Serve as Express API
+### Express
 
 ```typescript
-import express from 'express';
-import { createServer } from './commands';
-
-const app = express();
-app.use(express.json());
 app.use('/api', createServer().getExpressRouter());
-app.listen(3000);
 ```
 
-### Serve as MCP Server
+### MCP Server
 
 ```typescript
-import { createServer } from './commands';
-
-const server = createServer();
-await server.startMCP({
+await createServer().startMCP({
   name: 'my-mcp-server',
   version: '1.0.0',
   transport: 'stdio',
 });
 ```
 
-### List All Commands
-
-```typescript
-for (const cmd of server.listCommands()) {
-  console.log(`${cmd.name} → API: ${cmd.apiPath}, MCP: ${cmd.mcpTool}`);
-}
-```
-
 ---
 
 ## Registry Pattern
 
-For multiple commands, use a registry:
+For large projects, group commands in a registry:
 
 ```typescript
 // commands/index.ts
 import { CommandRegistry } from '@supernal/universal-command';
-import { userCreate } from './user-create';
-import { userList } from './user-list';
-import { userDelete } from './user-delete';
 
 export const registry = new CommandRegistry();
-
 registry.register(userCreate);
-registry.register(userList);
-registry.register(userDelete);
+registry.register(issueCreate);
 ```
 
-### Generate CLI Program
-
 ```typescript
-import { Command } from 'commander';
-import { registry } from './commands';
-
-const program = new Command();
-
+// Generate all CLI commands
 for (const cmd of registry.getAll()) {
   program.addCommand(cmd.toCLI());
 }
-
-program.parse();
 ```
 
-### Generate API Routes (Build-time)
-
 ```typescript
-// scripts/generate-routes.ts
-import { registry } from '../commands';
+// Generate all Next.js routes (build-time)
 import { generateNextRoutes } from '@supernal/universal-command/codegen';
 
-await generateNextRoutes(registry, {
-  outputDir: 'app/api',
-  typescript: true,
-});
-```
-
-Generates:
-
-```
-app/api/
-  users/
-    create/
-      route.ts  (auto-generated)
-    list/
-      route.ts  (auto-generated)
-    delete/
-      route.ts  (auto-generated)
-```
-
-### Generate MCP Server
-
-```typescript
-import { Server } from '@modelcontextprotocol/sdk/server';
-import { registry } from './commands';
-import { createMCPServer } from '@supernal/universal-command/mcp';
-
-const server = createMCPServer(registry, {
-  name: 'my-mcp-server',
-  version: '1.0.0',
-});
-
-server.connect(transport);
-```
-
----
-
-## Code Generation
-
-### CLI Generation (Runtime)
-
-```typescript
-const cli = command.toCLI();
-// Returns: Commander.Command
-```
-
-### API Generation (Build-time or Runtime)
-
-```typescript
-// Runtime (Next.js App Router)
-export const GET = command.toNextAPI();
-
-// Or build-time generation
-import { generateNextRoutes } from '@supernal/universal-command/codegen';
-await generateNextRoutes(registry, { outputDir: 'app/api' });
-```
-
-### MCP Generation (Runtime)
-
-```typescript
-const mcpTool = command.toMCP();
-// Returns: MCPToolDefinition
+await generateNextRoutes(registry, { outputDir: 'app/api', typescript: true });
+// Outputs: app/api/users/create/route.ts, app/api/issues/create/route.ts, ...
 ```
 
 ---
 
 ## Testing
 
-### Test the Handler Once
+Test the handler once — it works everywhere:
 
 ```typescript
-import { userCreate } from './user-create';
+import { userCreate } from './commands/user-create';
 
 test('creates user', async () => {
   const result = await userCreate.execute(
     { name: 'Alice', email: 'alice@example.com' },
-    { interface: 'test' } // Test context
+    { interface: 'test' }
   );
-
   expect(result.name).toBe('Alice');
 });
 ```
 
-### Integration Testing Helpers
+Integration test helpers:
 
 ```typescript
 import { testCLI, testAPI, testMCP } from '@supernal/universal-command/testing';
 
-test('CLI integration', async () => {
+test('CLI', async () => {
   const output = await testCLI(userCreate, {
     args: ['--name', 'Alice', '--email', 'alice@example.com'],
   });
-
   expect(output).toContain('Created user');
 });
 
-test('API integration', async () => {
-  const response = await testAPI(userCreate, {
+test('API', async () => {
+  const res = await testAPI(userCreate, {
     method: 'POST',
     body: { name: 'Alice', email: 'alice@example.com' },
   });
-
-  expect(response.status).toBe(200);
+  expect(res.status).toBe(200);
 });
 
-test('MCP integration', async () => {
+test('MCP', async () => {
   const result = await testMCP(userCreate, {
     arguments: { name: 'Alice', email: 'alice@example.com' },
   });
-
   expect(result.content[0].text).toContain('Alice');
 });
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│          UniversalCommand Definition                │
-│  • name, description, category                      │
-│  • input schema (parameters)                        │
-│  • output schema                                     │
-│  • handler (core logic)                             │
-│  • interface overrides (cli, api, mcp)              │
-└────────────────┬────────────────────────────────────┘
-                 │
-        ┌────────┼────────┐
-        │        │        │
-    ┌───▼──┐ ┌──▼───┐ ┌──▼───┐
-    │ CLI  │ │ API  │ │ MCP  │
-    │ Gen  │ │ Gen  │ │ Gen  │
-    └──┬───┘ └──┬───┘ └──┬───┘
-       │        │        │
-    ┌──▼──┐  ┌──▼──┐  ┌──▼──┐
-    │ CLI │  │ API │  │ MCP │
-    │ App │  │ App │  │ App │
-    └─────┘  └─────┘  └─────┘
 ```
 
 ---
@@ -645,16 +388,14 @@ test('MCP integration', async () => {
 class UniversalCommand<TInput, TOutput> {
   constructor(schema: CommandSchema<TInput, TOutput>);
 
-  // Execute command
   execute(args: TInput, context: ExecutionContext): Promise<TOutput>;
+  executeMCP(args: unknown): Promise<MCPToolResult>;
 
-  // Generate interfaces
-  toCLI(): Command;
-  toNextAPI(): NextAPIRoute;
+  toCLI(): Command; // Commander.js
+  toNextAPI(): NextAPIRoute; // Next.js App Router
   toExpressAPI(): ExpressRoute;
   toMCP(): MCPToolDefinition;
 
-  // Utilities
   validateArgs(args: unknown): ValidationResult<TInput>;
   getAPIRoutePath(): string;
   getMCPToolName(): string;
@@ -673,14 +414,13 @@ interface CommandSchema<TInput, TOutput> {
     parameters: Parameter[];
   };
 
-  output: {
+  output?: {
     type: 'json' | 'text' | 'stream';
     schema?: JSONSchema;
   };
 
   handler: (args: TInput, context: ExecutionContext) => Promise<TOutput>;
 
-  // Interface-specific options
   cli?: CLIOptions;
   api?: APIOptions;
   mcp?: MCPOptions;
@@ -693,7 +433,7 @@ interface CommandSchema<TInput, TOutput> {
 interface Parameter {
   name: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description: string;
+  description?: string;
   required?: boolean;
   default?: any;
 
@@ -702,7 +442,7 @@ interface Parameter {
   min?: number;
   max?: number;
   pattern?: string;
-  items?: Parameter; // For array type
+  items?: Parameter; // for array type
 }
 ```
 
@@ -712,195 +452,40 @@ interface Parameter {
 interface ExecutionContext {
   interface: 'cli' | 'api' | 'mcp' | 'test';
   projectRoot?: string;
-
-  // API-specific
-  request?: NextRequest | Request;
-
-  // CLI-specific
-  stdout?: NodeJS.WriteStream;
-  stderr?: NodeJS.WriteStream;
+  request?: NextRequest | Request; // API
+  stdout?: NodeJS.WriteStream; // CLI
+  stderr?: NodeJS.WriteStream; // CLI
 }
-```
-
----
-
-## Comparison
-
-| Feature              | Universal Command    | Manual Implementation     |
-| -------------------- | -------------------- | ------------------------- |
-| **Maintenance**      | Define once          | Define 3x (CLI/API/MCP)   |
-| **Drift risk**       | None (single source) | High (separate codebases) |
-| **Type safety**      | Full TypeScript      | Varies by interface       |
-| **Validation**       | Automatic            | Manual per interface      |
-| **Testing**          | Test once            | Test 3x                   |
-| **Documentation**    | Auto-generated       | Manual                    |
-| **Feature velocity** | High (add once)      | Low (add 3x)              |
-
----
-
-## Real-World Examples
-
-### GitHub CLI + API + MCP
-
-```typescript
-// Single definition
-const issueCreate = new UniversalCommand({
-  name: 'issue create',
-  description: 'Create a GitHub issue',
-
-  input: {
-    parameters: [
-      { name: 'title', type: 'string', required: true },
-      { name: 'body', type: 'string' },
-      { name: 'labels', type: 'array', items: { type: 'string' } },
-    ],
-  },
-
-  handler: async (args) => {
-    return await octokit.issues.create({
-      owner: 'org',
-      repo: 'repo',
-      title: args.title,
-      body: args.body,
-      labels: args.labels,
-    });
-  },
-});
-
-// Deploy everywhere
-const cli = issueCreate.toCLI(); // gh issue create
-const api = issueCreate.toNextAPI(); // POST /api/issues
-const mcp = issueCreate.toMCP(); // issue_create tool
 ```
 
 ---
 
 ## Roadmap
 
-### v1.0 (Current)
-
-- ✅ Core abstraction
-- ✅ CLI generation (Commander.js)
-- ✅ Next.js API generation
-- ✅ MCP generation
-- ✅ TypeScript support
-
-### v1.1 (Planned)
-
-- 🔄 Express.js API generation
-- 🔄 Streaming support
-- 🔄 Progress indicators
-- 🔄 Auto-generated docs
-
-### v2.0 (Future)
-
-- 📋 Hono API generation
-- 📋 FastAPI generation (Python)
-- 📋 gRPC generation
-- 📋 GraphQL generation
-
----
-
-## Development Workflow
-
-This project uses the [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) workflow system for requirement tracking and test traceability.
-
-### Requirements
-
-All features are documented as requirements in `.supernal/requirements/`:
-
-| Requirement                                                               | Description            | Tests |
-| ------------------------------------------------------------------------- | ---------------------- | ----- |
-| [REQ-UC-001](.supernal/requirements/req-uc-001-universal-command-core.md) | Universal Command Core | 20    |
-| [REQ-UC-002](.supernal/requirements/req-uc-002-command-registry.md)       | Command Registry       | 16    |
-| [REQ-UC-003](.supernal/requirements/req-uc-003-code-generators.md)        | Code Generators        | 18    |
-| [REQ-UC-004](.supernal/requirements/req-uc-004-scope-registry.md)         | Scope Registry         | 30    |
-| [REQ-UC-005](.supernal/requirements/req-uc-005-testing-utilities.md)      | Testing Utilities      | 9     |
-
-### Git Hooks
-
-Pre-commit hooks ensure code quality:
-
-- **Lint-staged**: Format and lint staged files
-- **Type check**: TypeScript compilation
-- **Tests**: All 93 tests must pass
-
-```bash
-# Hooks run automatically on commit
-git commit -m "feat: add new feature"
-
-# Run manually
-npm run type-check && npm run test:ci
-```
-
----
-
-## Publishing to npm
-
-### For Maintainers
-
-```bash
-# Ensure you're logged in to npm
-npm login
-
-# Run tests and build
-pnpm test:ci
-pnpm build
-
-# Publish (prepublishOnly will run automatically)
-npm publish
-
-# Or publish a beta version
-npm publish --tag beta
-```
-
-### Version Bumping
-
-```bash
-# Patch release (0.1.0 -> 0.1.1)
-npm version patch
-
-# Minor release (0.1.0 -> 0.2.0)
-npm version minor
-
-# Major release (0.1.0 -> 1.0.0)
-npm version major
-```
+| Version  | Status     | Features                                   |
+| -------- | ---------- | ------------------------------------------ |
+| **v1.0** | ✅ Current | CLI, Next.js API, MCP, TypeScript          |
+| **v1.1** | 🔄 Planned | Express.js, streaming, auto-generated docs |
+| **v2.0** | 📋 Future  | Hono, gRPC, GraphQL                        |
 
 ---
 
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md)
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+This project uses [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) for requirement tracking. Pre-commit hooks run lint, type-check, and all 93 tests automatically.
 
 ---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE)
+MIT — See [LICENSE](LICENSE)
 
 ---
 
-## Credits
+<div align="center">
 
-Developed by [Supernal Intelligence](https://supernal.ai) as part of the [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) project.
+Built by [Supernal Intelligence](https://supernal.ai) · [Commander.js](https://github.com/tj/commander.js) · [Next.js](https://nextjs.org) · [Model Context Protocol](https://modelcontextprotocol.io)
 
-Inspired by the need to maintain CLI, API, and MCP interfaces for AI-assisted development tools.
-
----
-
-## Related Projects
-
-- [Commander.js](https://github.com/tj/commander.js) - CLI framework
-- [Next.js](https://nextjs.org) - React framework with API routes
-- [Model Context Protocol](https://modelcontextprotocol.io) - AI tool integration
-- [tRPC](https://trpc.io) - End-to-end typesafe APIs
-
----
-
-## Support
-
-- 📖 [Documentation](https://docs.supernal.ai/universal-command)
-- 💬 [Discord](https://discord.gg/supernal)
-- 🐛 [Issue Tracker](https://github.com/supernalintelligence/universal-command/issues)
-- ✉️ Email: support@supernal.ai
+</div>
