@@ -625,8 +625,9 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       schema.pattern = param.pattern;
     }
 
-    if (param.type === 'array' && param.items) {
-      schema.items = this.parameterToJSONSchema(param.items);
+    if (param.type === 'array') {
+      // OpenAI/Codex requires `items` on array schemas; default to string if not specified
+      schema.items = param.items ? this.parameterToJSONSchema(param.items) : { type: 'string' };
     }
 
     if (param.type === 'object' && param.properties) {
