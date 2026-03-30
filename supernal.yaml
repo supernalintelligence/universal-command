@@ -1,0 +1,42 @@
+# Supernal Configuration for @supernal/universal-command
+# This package demonstrates the Supernal workflow system
+
+version: '1.0'
+package:
+  name: '@supernal/universal-command'
+  type: standalone
+  license: MIT
+
+# Reference to parent monorepo (for full requirement context)
+upstream:
+  repo: https://github.com/supernalintelligence/supernal-coding
+  docs_path: docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
+
+# Local requirements (self-contained in this package)
+requirements:
+  prefix: REQ-UC
+  path: .supernal/requirements
+
+# Test configuration
+testing:
+  framework: vitest
+  path: src/**/*.test.ts
+  requirement_linkage: true
+
+# Git hooks
+git_hooks:
+  pre_commit:
+    checks:
+      lint_staged:
+        enabled: true
+      type_check:
+        enabled: true
+      test_suite:
+        enabled: true
+        block_on_failures: true
+
+# Features enabled
+features:
+  requirement_tracking: true
+  test_traceability: true
+  commit_traceability: true

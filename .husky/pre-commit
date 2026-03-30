@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Run lint-staged for formatting and linting
+npx lint-staged
+
+# Run type check
+npm run type-check
+
+# Run tests
+npm run test:ci
