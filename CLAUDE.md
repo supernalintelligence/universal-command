@@ -53,17 +53,17 @@ src/
 import { UniversalCommand } from '@supernal/universal-command';
 
 const myCommand = new UniversalCommand({
-  name: 'thing do',           // Space-separated = subcommand tree (sc thing do)
+  name: 'thing do', // Space-separated = subcommand tree (sc thing do)
   description: 'Does the thing',
-  scope: 'project',           // Semantic scope for grouping
-  keywords: ['thing'],        // For MCP/search discovery
+  scope: 'project', // Semantic scope for grouping
+  keywords: ['thing'], // For MCP/search discovery
   input: {
     parameters: [
       { name: 'id', type: 'string', required: true, positional: true },
       { name: 'format', type: 'string', enum: ['json', 'text'], default: 'json' },
     ],
   },
-  output: { type: 'json' },   // 'json' | 'text' | 'stream'
+  output: { type: 'json' }, // 'json' | 'text' | 'stream'
   handler: async (args, context) => {
     // context.interface is 'cli' | 'api' | 'mcp' | 'test'
     return { result: args.id };
@@ -104,3 +104,19 @@ const myCommand = new UniversalCommand({
 - The `execute()` method validates args before calling handler -- do not skip validation
 - When adding a new entry point, update both `tsup.config.ts` (entry) and `package.json` (exports)
 - `generateNextRoutes` and `generateMCPServer` in codegen are deprecated -- use the generators module directly
+
+---
+
+## Meta-Repo Context
+
+This package is a **git submodule** within the [supernal-coding](https://github.com/supernalintelligence/supernal-coding) monorepo. When working here, the parent repo's CLAUDE.md is NOT auto-loaded — you are in an isolated git root.
+
+**Cross-cutting tools available from the parent repo:**
+
+- `sc task create/list/done` — task management (tracks work across all packages)
+- `sc test` — test runner with requirement evidence logging
+- `si test` — interface testing, contract scanning
+- `@supernal/universal-command` — all new commands must use this pattern
+- `repotype validate` — repo structure validation
+
+**Parent docs:** See the root [CLAUDE.md](../../CLAUDE.md) and [/supernal/CLAUDE.md](../../../CLAUDE.md) for monorepo-wide conventions and the full sub-repo map.
