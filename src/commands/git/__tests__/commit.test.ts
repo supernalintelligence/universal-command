@@ -24,15 +24,21 @@ describe('Git Commit (Universal Command)', () => {
     // Create temp git repo for testing
     testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'uc-git-commit-test-'));
 
+    // Strip git hook env vars so commands operate on testDir, not the hook's GIT_DIR
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.GIT_DIR;
+    delete cleanEnv.GIT_WORK_TREE;
+    delete cleanEnv.GIT_INDEX_FILE;
+
     // Initialize git repo
-    execSync('git init', { cwd: testDir });
-    execSync('git config user.email "test@example.com"', { cwd: testDir });
-    execSync('git config user.name "Test User"', { cwd: testDir });
+    execSync('git init', { cwd: testDir, env: cleanEnv });
+    execSync('git config user.email "test@example.com"', { cwd: testDir, env: cleanEnv });
+    execSync('git config user.name "Test User"', { cwd: testDir, env: cleanEnv });
 
     // Create initial commit
     await fs.writeFile(path.join(testDir, 'README.md'), '# Test\n');
-    execSync('git add README.md', { cwd: testDir });
-    execSync('git commit -m "Initial commit"', { cwd: testDir });
+    execSync('git add README.md', { cwd: testDir, env: cleanEnv });
+    execSync('git commit -m "Initial commit"', { cwd: testDir, env: cleanEnv });
 
     // Setup mock stdout/stderr
     stdoutChunks = [];
@@ -113,8 +119,8 @@ describe('Git Commit (Universal Command)', () => {
     expect(optionFlags.some((f: string) => f.includes('--message'))).toBe(true);
     expect(optionFlags.some((f: string) => f.includes('--nit'))).toBe(true);
     // Either --dry-run or --dryRun should exist
-    const hasDryRun = optionFlags.some((f: string) =>
-      f.includes('--dry-run') || f.includes('--dryRun')
+    const hasDryRun = optionFlags.some(
+      (f: string) => f.includes('--dry-run') || f.includes('--dryRun')
     );
     expect(hasDryRun).toBe(true);
   });
@@ -188,9 +194,7 @@ describe('Git Commit - Phase 1 Gate 1 Validation', () => {
     expect(metadata.cli?.path).toEqual(['git', 'commit']);
 
     // Build command tree
-    const roots = gitCommitCommand.constructor.buildCommandTree([
-      gitCommitCommand as any,
-    ]);
+    const roots = gitCommitCommand.constructor.buildCommandTree([gitCommitCommand as any]);
     expect(roots).toHaveLength(1);
     expect(roots[0].name()).toBe('git');
   });

@@ -1,0 +1,67 @@
+# repotype.yaml — universal-command
+# Run: repotype validate .
+version: '1'
+extends: '../../packages/repotype/profiles/supernal/repotype.yaml'
+
+defaults:
+  inheritance: merge
+  strictness: balanced
+  unmatchedFiles: deny
+
+ignore:
+  - node_modules/**
+  - dist/**
+  - .turbo/**
+  - '*.tsbuildinfo'
+  - coverage/**
+
+folders:
+  - id: package-root
+    path: .
+    allowedFolders:
+      - src
+      - dist
+      - tests
+      - docs
+      - bin
+      - scripts
+      - examples
+      - profiles
+      - schemas
+      - __tests__
+      - __mocks__
+      - .turbo
+
+files:
+  - id: package-json
+    glob: package.json
+
+  - id: tsconfig
+    glob: tsconfig.json
+
+  - id: readme
+    glob: README.md
+
+  - id: claude-md
+    glob: CLAUDE.md
+
+  - id: source-files
+    glob: 'src/**/*'
+
+  - id: test-files
+    glob: '{tests,__tests__}/**/*'
+
+  - id: dist-files
+    glob: 'dist/**/*'
+
+  - id: bin-files
+    glob: 'bin/**/*'
+
+  - id: script-files
+    glob: 'scripts/**/*'
+
+  - id: doc-files
+    glob: 'docs/**/*'
+
+  - id: example-files
+    glob: 'examples/**/*'

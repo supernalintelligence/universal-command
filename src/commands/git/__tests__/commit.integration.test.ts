@@ -19,15 +19,21 @@ describe('Git Commit Integration', () => {
     // Create temp git repo
     testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'uc-git-commit-int-'));
 
+    // Strip git hook env vars so commands operate on testDir, not the hook's GIT_DIR
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.GIT_DIR;
+    delete cleanEnv.GIT_WORK_TREE;
+    delete cleanEnv.GIT_INDEX_FILE;
+
     // Initialize git repo
-    execSync('git init', { cwd: testDir });
-    execSync('git config user.email "test@example.com"', { cwd: testDir });
-    execSync('git config user.name "Test User"', { cwd: testDir });
+    execSync('git init', { cwd: testDir, env: cleanEnv });
+    execSync('git config user.email "test@example.com"', { cwd: testDir, env: cleanEnv });
+    execSync('git config user.name "Test User"', { cwd: testDir, env: cleanEnv });
 
     // Create initial commit
     await fs.writeFile(path.join(testDir, 'README.md'), '# Test\n');
-    execSync('git add README.md', { cwd: testDir });
-    execSync('git commit -m "Initial commit"', { cwd: testDir });
+    execSync('git add README.md', { cwd: testDir, env: cleanEnv });
+    execSync('git commit -m "Initial commit"', { cwd: testDir, env: cleanEnv });
   });
 
   afterEach(async () => {
@@ -134,9 +140,7 @@ describe('Git Commit Integration', () => {
 describe('Git Commit - Command Tree Integration', () => {
   it('should integrate into git command tree', () => {
     // Build command tree with git commit
-    const roots = gitCommitCommand.constructor.buildCommandTree([
-      gitCommitCommand as any,
-    ]);
+    const roots = gitCommitCommand.constructor.buildCommandTree([gitCommitCommand as any]);
 
     expect(roots).toHaveLength(1);
     expect(roots[0].name()).toBe('git');
@@ -152,9 +156,7 @@ describe('Git Commit - Command Tree Integration', () => {
     // This test validates the command tree structure is ready for additional git commands
 
     // For now, just validate that commit is properly nested
-    const roots = gitCommitCommand.constructor.buildCommandTree([
-      gitCommitCommand as any,
-    ]);
+    const roots = gitCommitCommand.constructor.buildCommandTree([gitCommitCommand as any]);
 
     expect(roots).toHaveLength(1);
     expect(roots[0].name()).toBe('git');
