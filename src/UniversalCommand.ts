@@ -250,8 +250,15 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           ? `--${param.name} <${param.name}>`
           : `--${param.name} [${param.name}]`;
 
+      // Provide a parseArg coercion function for numeric params so Commander
+      // delivers a number to the action handler (not a raw string), which
+      // allows validateType to pass without "Must be a number" errors.
+      const parseArg = param.type === 'number' ? (v: string) => Number(v) : undefined;
+
       if (param.required && !isBoolean) {
-        cmd.requiredOption(flags, param.description);
+        cmd.requiredOption(flags, param.description, parseArg);
+      } else if (parseArg !== undefined) {
+        cmd.option(flags, param.description, parseArg, param.default);
       } else {
         cmd.option(flags, param.description, param.default);
       }
