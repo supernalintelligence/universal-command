@@ -43,7 +43,7 @@ features:
 
 director:
   enabled: true
-  schedule: '*/15 * * * *'
+  schedule_profile: frequent
   dry_run: false
   max_workers: 2
   surfaces:
@@ -64,3 +64,10 @@ director:
     max_open_prs: 3
     max_open_prs_per_submodule: 1
     pr_check_command: gh pr list
+  cost_budgets:
+    local:
+      daily_compute_ms: 300000
+    github:
+      daily_usd: 0.50
+    global:
+      daily_usd: 2.00
