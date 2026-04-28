@@ -30,3 +30,6 @@ export type { RuntimeAPIConfig, RuntimeMCPConfig } from './runtime';
 // Scope-based registry (O(1) keyed lookup, semantic namespaces)
 export { ScopeRegistry, createScopeRegistry } from './scopes';
 export type { Scope, ScopeOptions } from './scopes';
+
+// MCP server factory — re-exported for moduleResolution:node compatibility
+export { createMCPServer } from './mcp';
