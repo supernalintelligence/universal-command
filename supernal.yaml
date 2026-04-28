@@ -43,6 +43,7 @@ features:
 
 director:
   enabled: true
+  schedule: '*/15 * * * *'
   dry_run: false
   max_workers: 2
   surfaces:
