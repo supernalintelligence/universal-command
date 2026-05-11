@@ -12,18 +12,13 @@ export default defineConfig({
     'mcp/index': 'src/mcp/index.ts',
     'testing/index': 'src/testing/index.ts',
     'runtime/index': 'src/runtime/index.ts',
-    'scopes/index': 'src/scopes/index.ts'
+    'scopes/index': 'src/scopes/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
   sourcemap: true,
-  clean: true,
+  clean: false,
   splitting: false,
   treeshake: true,
-  external: [
-    'commander',
-    'next',
-    'next/server',
-    '@modelcontextprotocol/sdk'
-  ]
+  external: ['commander', 'next', 'next/server', '@modelcontextprotocol/sdk'],
 });
