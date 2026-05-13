@@ -658,6 +658,66 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   }
 
   /**
+   * Generate a config + handler pair for use with @supernal/interface's Tool decorator.
+   *
+   * The returned object can be passed directly to fromCommand() in @supernal/interface,
+   * or used manually with Tool(config)(handler) to register this command in the ToolRegistry.
+   * The handler calls execute() with interface: 'api' — same validation path as toNextAPI().
+   *
+   * Constraints:
+   * - Commands with output.type === 'stream' are not supported; toTool() throws immediately.
+   * - The ExecutionContext passed to the handler has interface: 'api' but no request object.
+   *   Command handlers that call context.request.* will throw at runtime. Design handlers
+   *   to treat context.request as optional when they are intended for multi-surface use.
+   * - aiEnabled defaults to false. Pass extraConfig: { aiEnabled: true } explicitly for
+   *   commands you want AI agents to discover and call autonomously.
+   *
+   * @example with fromCommand helper (recommended)
+   *   import { fromCommand } from '@supernal/interface'
+   *   export const myTool = fromCommand(myCommand)
+   *
+   * @example opt in to AI agent access
+   *   export const myTool = fromCommand(myCommand, { aiEnabled: true })
+   *
+   * @example manual wiring
+   *   import { Tool } from '@supernal/interface'
+   *   const { config, handler } = myCommand.toTool()
+   *   export const myTool = Tool(config)(handler)
+   */
+  toTool(extraConfig?: Record<string, unknown>): {
+    config: Record<string, unknown>;
+    handler: (args: TInput) => Promise<TOutput>;
+  } {
+    if (this.schema.output.type === 'stream') {
+      throw new Error(
+        `toTool() does not support streaming commands (command: '${this.schema.name}'). ` +
+          `Wrap the handler in a non-streaming adapter before registering with ToolRegistry.`
+      );
+    }
+    return {
+      config: {
+        name: this.schema.name,
+        description: this.schema.description,
+        keywords: this.schema.keywords || [],
+        inputSchema: this.parametersToJSONSchema(),
+        // ToolConfig only supports 'json' | 'markdown'. output.type 'text' maps to 'markdown'
+        // which may trigger rendering in some consumers — design text-output handlers accordingly.
+        returnType: this.schema.output.type === 'json' ? 'json' : 'markdown',
+        executionContext: 'api',
+        // Default false — callers must explicitly opt in via extraConfig: { aiEnabled: true }.
+        // Matches @Tool's safe default (aiEnabled: false for standalone functions).
+        aiEnabled: false,
+        ...extraConfig,
+      },
+      handler: Object.defineProperty(
+        (args: TInput) => this.execute(args, { interface: 'api' }),
+        'name',
+        { value: this.schema.name.replace(/\s+/g, '_'), writable: false }
+      ) as (args: TInput) => Promise<TOutput>,
+    };
+  }
+
+  /**
    * Get the MCP tool name
    */
   getMCPToolName(): string {

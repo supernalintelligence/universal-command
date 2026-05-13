@@ -74,6 +74,19 @@ const myCommand = new UniversalCommand({
 });
 ```
 
+## Surfaces
+
+Every `UniversalCommand` emits four surfaces from one definition:
+
+| Method        | Surface                | Consumer                            |
+| ------------- | ---------------------- | ----------------------------------- |
+| `toCLI()`     | Commander.js command   | `sc <name>` in terminal             |
+| `toNextAPI()` | Next.js route handlers | HTTP / fetch()                      |
+| `toMCP()`     | MCP tool definition    | AI agents via MCP                   |
+| `toTool()`    | `{ config, handler }`  | UI ToolRegistry via `fromCommand()` |
+
+`toTool()` maps the schema to a `@supernal/interface`-compatible config and wraps `execute()` with `interface: 'api'`. Use `fromCommand(myCommand)` in supernal-interface code to register it. No transport added — direct function call. Full spec: `.supernal/docs/specs/platform/universal-tool-bridge.md`
+
 ## Key Interfaces
 
 - `CommandSchema<TInput, TOutput>`: Full command definition (name, description, input, output, handler, cli/api/mcp options)
