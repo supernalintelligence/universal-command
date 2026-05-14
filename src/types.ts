@@ -154,6 +154,12 @@ export interface CLIOptions {
    * When true, options after '--' are available in context.passThroughOptions
    */
   passThroughOptions?: boolean;
+
+  /**
+   * Custom exit code resolver — called with the handler result to determine process exit code
+   * Useful when a command needs to signal non-zero exit based on result content (e.g. eval scoring)
+   */
+  exitCode?: (result: any) => number;
 }
 
 /**
