@@ -5,9 +5,10 @@
 import { ExecutionContext } from '../../types';
 import { CommandError } from '../../errors';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const WipManager = require('../../../../../supernal-code-package/lib/wip/WipManager');
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface WipStatusInput {
   // No parameters
 }

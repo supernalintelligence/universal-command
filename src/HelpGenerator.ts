@@ -5,7 +5,7 @@
  * Critical for fast CLI startup - help should not trigger handler loading.
  */
 
-import type { CommandSchema, Parameter } from './types';
+import type { Parameter } from './types';
 import type { LazyUniversalCommand } from './LazyUniversalCommand';
 import type { UniversalCommand } from './UniversalCommand';
 
@@ -140,8 +140,8 @@ export class HelpGenerator {
     const lines: string[] = [];
 
     // Separate positional from options
-    const positional = parameters.filter(p => p.positional);
-    const options = parameters.filter(p => !p.positional);
+    const positional = parameters.filter((p) => p.positional);
+    const options = parameters.filter((p) => !p.positional);
 
     if (positional.length > 0) {
       lines.push('Positional:');

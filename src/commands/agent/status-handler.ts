@@ -5,8 +5,11 @@
 import { ExecutionContext } from '../../types';
 import { CommandError } from '../../errors';
 
-const { AgentWorktreeManager } = require('../../../../../supernal-code-package/lib/lib/agent/AgentWorktreeManager');
+const {
+  AgentWorktreeManager,
+} = require('../../../../../supernal-code-package/lib/lib/agent/AgentWorktreeManager');
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AgentStatusInput {
   // No parameters
 }

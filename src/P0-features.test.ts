@@ -7,9 +7,8 @@
  * - P0-6: Pass-through flags
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { UniversalCommand } from './UniversalCommand';
-import { CommandSchema } from './types';
 import { Writable } from 'stream';
 
 describe('P0-1: Subcommand Trees', () => {

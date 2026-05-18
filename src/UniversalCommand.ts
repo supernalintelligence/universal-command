@@ -190,7 +190,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     // Lazy load commander to avoid hard dependency
     let Command: any;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       Command = require('commander').Command;
     } catch {
       throw new Error(
@@ -311,7 +311,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
             options?: { default?: string; mask?: boolean }
           ) => {
             // Simple readline-based prompt
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const readline = require('readline');
             const rl = readline.createInterface({
               input: process.stdin,
@@ -372,7 +372,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   static buildCommandTree(commands: UniversalCommand[]): any {
     let Command: any;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       Command = require('commander').Command;
     } catch {
       throw new Error('commander package is required. Install with: npm install commander');
@@ -446,7 +446,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Create response
         let NextResponse: any;
         try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           NextResponse = require('next/server').NextResponse;
         } catch {
           throw new Error(
@@ -476,7 +476,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       } catch (error: any) {
         let NextResponse: any;
         try {
-          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
           NextResponse = require('next/server').NextResponse;
         } catch {
           // Fallback to basic Response

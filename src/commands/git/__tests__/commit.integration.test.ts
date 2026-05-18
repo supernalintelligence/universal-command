@@ -10,7 +10,6 @@ import { execSync } from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
-import { Writable } from 'stream';
 
 describe('Git Commit Integration', () => {
   let testDir: string;

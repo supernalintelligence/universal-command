@@ -45,13 +45,21 @@ export interface CLIHooks {
    * Called before any command executes
    * Can modify context or throw to prevent execution
    */
-  beforeCommand?: (commandName: string, args: any, context: ExecutionContext) => Promise<void> | void;
+  beforeCommand?: (
+    commandName: string,
+    args: any,
+    context: ExecutionContext
+  ) => Promise<void> | void;
 
   /**
    * Called after command executes successfully
    * Can perform cleanup or logging
    */
-  afterCommand?: (commandName: string, result: any, context: ExecutionContext) => Promise<void> | void;
+  afterCommand?: (
+    commandName: string,
+    result: any,
+    context: ExecutionContext
+  ) => Promise<void> | void;
 
   /**
    * Called when command throws an error
@@ -196,7 +204,10 @@ export class CLIProgram {
   /**
    * Wrap command action with hooks
    */
-  private wrapAction(commandName: string, originalAction: Function): Function {
+  private wrapAction(
+    commandName: string,
+    originalAction: (...args: unknown[]) => unknown
+  ): (...args: unknown[]) => unknown {
     return async (...args: any[]) => {
       const context: ExecutionContext = {
         interface: 'cli',

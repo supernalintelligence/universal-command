@@ -15,12 +15,7 @@
  *   AI can use load_scope/unload_scope meta-tools to manage context.
  */
 
-import {
-  UniversalCommand,
-  createRuntimeServer,
-  type CommandSchema,
-  type Scope
-} from '@supernal/universal-command';
+import { UniversalCommand, createRuntimeServer, type Scope } from '@supernal/universal-command';
 
 // ============================================================================
 // 1. Define Scopes (semantic groupings for progressive tool loading)
@@ -35,14 +30,14 @@ export const requirementScope: Scope = {
   name: 'Requirement Management',
   description: 'Tools for managing project requirements and specifications',
   keywords: ['requirement', 'req', 'spec', 'feature', 'user story'],
-  requiredStates: ['project-loaded']
+  requiredStates: ['project-loaded'],
 };
 
 export const gitScope: Scope = {
   id: 'git',
   name: 'Git Operations',
   description: 'Version control and repository management',
-  keywords: ['git', 'commit', 'branch', 'merge', 'push', 'pull']
+  keywords: ['git', 'commit', 'branch', 'merge', 'push', 'pull'],
 };
 
 export const deployScope: Scope = {
@@ -50,7 +45,7 @@ export const deployScope: Scope = {
   name: 'Deployment',
   description: 'Build and deployment tools',
   keywords: ['deploy', 'build', 'release', 'ci', 'cd'],
-  requiredStates: ['project-loaded', 'ci-configured']
+  requiredStates: ['project-loaded', 'ci-configured'],
 };
 
 // ============================================================================
@@ -64,7 +59,7 @@ export const requirementList = new UniversalCommand({
   name: 'requirement list',
   description: 'List requirements in the current project',
   category: 'requirements',
-  scope: 'requirement',  // Belongs to requirement scope
+  scope: 'requirement', // Belongs to requirement scope
   keywords: ['list', 'show', 'all'],
 
   input: {
@@ -73,14 +68,14 @@ export const requirementList = new UniversalCommand({
         name: 'status',
         type: 'string',
         description: 'Filter by status',
-        enum: ['draft', 'approved', 'implemented', 'tested']
+        enum: ['draft', 'approved', 'implemented', 'tested'],
       },
       {
         name: 'format',
         type: 'string',
         description: 'Output format',
         default: 'table',
-        enum: ['table', 'json', 'markdown']
+        enum: ['table', 'json', 'markdown'],
       },
       {
         name: 'limit',
@@ -88,9 +83,9 @@ export const requirementList = new UniversalCommand({
         description: 'Maximum number of results',
         default: 50,
         min: 1,
-        max: 500
-      }
-    ]
+        max: 500,
+      },
+    ],
   },
 
   output: { type: 'json' },
@@ -102,18 +97,18 @@ export const requirementList = new UniversalCommand({
     const requirements = [
       { id: 'REQ-001', title: 'User authentication', status: 'approved' },
       { id: 'REQ-002', title: 'Dashboard analytics', status: 'draft' },
-      { id: 'REQ-003', title: 'Export functionality', status: 'implemented' }
+      { id: 'REQ-003', title: 'Export functionality', status: 'implemented' },
     ];
 
     let filtered = requirements;
     if (args.status) {
-      filtered = filtered.filter(r => r.status === args.status);
+      filtered = filtered.filter((r) => r.status === args.status);
     }
 
     return {
       requirements: filtered.slice(0, args.limit),
       total: filtered.length,
-      format: args.format
+      format: args.format,
     };
   },
 
@@ -130,19 +125,19 @@ export const requirementList = new UniversalCommand({
         .map((r: any) => `${r.id}\t\t${r.title.padEnd(24)}\t${r.status}`)
         .join('\n');
       return `${header}\n${'-'.repeat(60)}\n${rows}\n\nTotal: ${result.total}`;
-    }
+    },
   },
 
   // API-specific: caching
   api: {
     method: 'GET',
-    cacheControl: { maxAge: 60 }
+    cacheControl: { maxAge: 60 },
   },
 
   // MCP-specific: tool name
   mcp: {
-    toolName: 'sc_requirement_list'
-  }
+    toolName: 'sc_requirement_list',
+  },
 });
 
 /**
@@ -152,7 +147,7 @@ export const requirementCreate = new UniversalCommand({
   name: 'requirement create',
   description: 'Create a new requirement',
   category: 'requirements',
-  scope: 'requirement',  // Belongs to requirement scope
+  scope: 'requirement', // Belongs to requirement scope
   keywords: ['create', 'add', 'new'],
 
   input: {
@@ -161,26 +156,26 @@ export const requirementCreate = new UniversalCommand({
         name: 'title',
         type: 'string',
         description: 'Requirement title',
-        required: true
+        required: true,
       },
       {
         name: 'description',
         type: 'string',
-        description: 'Detailed description'
+        description: 'Detailed description',
       },
       {
         name: 'priority',
         type: 'string',
         description: 'Priority level',
         default: 'medium',
-        enum: ['low', 'medium', 'high', 'critical']
+        enum: ['low', 'medium', 'high', 'critical'],
       },
       {
         name: 'assignee',
         type: 'string',
-        description: 'Assigned team member'
-      }
-    ]
+        description: 'Assigned team member',
+      },
+    ],
   },
 
   output: { type: 'json' },
@@ -194,7 +189,7 @@ export const requirementCreate = new UniversalCommand({
       priority: args.priority,
       assignee: args.assignee,
       status: 'draft',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     // In real SC: await RequirementManager.create(requirement)
@@ -202,12 +197,12 @@ export const requirementCreate = new UniversalCommand({
     return {
       success: true,
       requirement,
-      message: `Created requirement ${requirement.id}`
+      message: `Created requirement ${requirement.id}`,
     };
   },
 
   api: { method: 'POST' },
-  mcp: { toolName: 'sc_requirement_create' }
+  mcp: { toolName: 'sc_requirement_create' },
 });
 
 /**
@@ -227,9 +222,9 @@ export const healthCheck = new UniversalCommand({
         name: 'verbose',
         type: 'boolean',
         description: 'Show detailed output',
-        default: false
-      }
-    ]
+        default: false,
+      },
+    ],
   },
 
   output: { type: 'json' },
@@ -239,10 +234,10 @@ export const healthCheck = new UniversalCommand({
       git: { status: 'ok', message: 'Git repository initialized' },
       config: { status: 'ok', message: 'supernal.yaml found' },
       dependencies: { status: 'ok', message: 'All dependencies installed' },
-      tests: { status: 'warning', message: '3 tests skipped' }
+      tests: { status: 'warning', message: '3 tests skipped' },
     };
 
-    const overall = Object.values(checks).every(c => c.status === 'ok')
+    const overall = Object.values(checks).every((c) => c.status === 'ok')
       ? 'healthy'
       : 'needs attention';
 
@@ -257,17 +252,17 @@ export const healthCheck = new UniversalCommand({
     aliases: ['hc'],
     format: (result) => {
       if (result.checks) {
-        const lines = Object.entries(result.checks)
-          .map(([name, check]: [string, any]) =>
+        const lines = Object.entries(result.checks).map(
+          ([name, check]: [string, any]) =>
             `${check.status === 'ok' ? '✓' : '⚠'} ${name}: ${check.message}`
-          );
+        );
         return `Project Health: ${result.overall}\n\n${lines.join('\n')}`;
       }
       return `Project Health: ${result.overall} (${result.summary})`;
-    }
+    },
   },
 
-  mcp: { toolName: 'sc_health_check' }
+  mcp: { toolName: 'sc_health_check' },
 });
 
 // ============================================================================
@@ -400,5 +395,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   console.log('\nTotal:', server.getRegistry().size, 'commands registered');
-  console.log('Scopes:', scopeRegistry.scopeCount, '| Loaded:', scopeRegistry.getLoadedScopeIds().join(', '));
+  console.log(
+    'Scopes:',
+    scopeRegistry.scopeCount,
+    '| Loaded:',
+    scopeRegistry.getLoadedScopeIds().join(', ')
+  );
 }

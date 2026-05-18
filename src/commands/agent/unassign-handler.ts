@@ -5,7 +5,9 @@
 import { ExecutionContext } from '../../types';
 import { CommandError } from '../../errors';
 
-const { AgentWorktreeManager } = require('../../../../../supernal-code-package/lib/lib/agent/AgentWorktreeManager');
+const {
+  AgentWorktreeManager,
+} = require('../../../../../supernal-code-package/lib/lib/agent/AgentWorktreeManager');
 
 export interface AgentUnassignInput {
   remove?: boolean;
@@ -49,18 +51,14 @@ export async function handler(
 
       console.log('✅ Unassigned from worktree');
 
-      // Handle removal if requested
-      let removed = false;
+      // Note: --remove is not yet implemented; use sc agent cleanup --self
       if (args.remove && !args.keep) {
-        // Note: The legacy implementation doesn't support --remove directly
-        // This would require calling the cleanup logic with --self
-        // For now, we just unassign and let the user manually cleanup
         console.log('💡 To remove the worktree, use: sc agent cleanup --self');
       }
 
       return {
         success: true,
-        removed,
+        removed: false,
         message: 'Unassigned from worktree',
       };
     } finally {

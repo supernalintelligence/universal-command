@@ -3,14 +3,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { CommandRegistry, UniversalCommand } from '../index';
-import {
-  generate,
-  generatorRegistry,
-  GeneratorRegistry,
-  NextRoutesGenerator,
-  MCPServerGenerator,
-  OpenAPIGenerator
-} from './index';
+import { generate, generatorRegistry, GeneratorRegistry } from './index';
 
 describe('Generator Plugin System', () => {
   let tempDir: string;
@@ -19,14 +12,16 @@ describe('Generator Plugin System', () => {
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gen-test-'));
     registry = new CommandRegistry();
-    registry.register(new UniversalCommand({
-      name: 'user list',
-      description: 'List users',
-      category: 'users',
-      input: { parameters: [] },
-      output: { type: 'json' },
-      handler: async () => []
-    }));
+    registry.register(
+      new UniversalCommand({
+        name: 'user list',
+        description: 'List users',
+        category: 'users',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        handler: async () => [],
+      })
+    );
   });
 
   afterEach(async () => {
@@ -46,7 +41,7 @@ describe('Generator Plugin System', () => {
         name: 'custom-gen',
         description: 'Custom generator',
         outputExtensions: ['.ts'],
-        generate: async () => ({ files: [] })
+        generate: async () => ({ files: [] }),
       };
 
       customRegistry.register(mockGenerator);
@@ -60,25 +55,27 @@ describe('Generator Plugin System', () => {
         name: 'custom-gen',
         description: 'Custom generator',
         outputExtensions: ['.ts'],
-        generate: async () => ({ files: [] })
+        generate: async () => ({ files: [] }),
       };
 
       customRegistry.register(mockGenerator);
-      expect(() => customRegistry.register(mockGenerator))
-        .toThrow('Generator "custom-gen" is already registered');
+      expect(() => customRegistry.register(mockGenerator)).toThrow(
+        'Generator "custom-gen" is already registered'
+      );
     });
 
     it('should list all generators', () => {
       const generators = generatorRegistry.getAll();
       expect(generators.length).toBeGreaterThanOrEqual(3);
-      expect(generators.map(g => g.name)).toContain('next-routes');
+      expect(generators.map((g) => g.name)).toContain('next-routes');
     });
   });
 
   describe('generate()', () => {
     it('should throw for unknown generator', async () => {
-      await expect(generate('unknown', registry, {}))
-        .rejects.toThrow('Generator "unknown" not found');
+      await expect(generate('unknown', registry, {})).rejects.toThrow(
+        'Generator "unknown" not found'
+      );
     });
   });
 
@@ -94,10 +91,7 @@ describe('Generator Plugin System', () => {
     it('should generate valid TypeScript content', async () => {
       await generate('next-routes', registry, { outputDir: tempDir });
 
-      const content = await fs.readFile(
-        path.join(tempDir, 'user/list/route.ts'),
-        'utf-8'
-      );
+      const content = await fs.readFile(path.join(tempDir, 'user/list/route.ts'), 'utf-8');
 
       expect(content).toContain('Auto-generated API route');
       expect(content).toContain('export const GET');
@@ -105,14 +99,16 @@ describe('Generator Plugin System', () => {
     });
 
     it('should handle multiple commands', async () => {
-      registry.register(new UniversalCommand({
-        name: 'user create',
-        description: 'Create user',
-        input: { parameters: [] },
-        output: { type: 'json' },
-        handler: async () => ({}),
-        api: { method: 'POST' }
-      }));
+      registry.register(
+        new UniversalCommand({
+          name: 'user create',
+          description: 'Create user',
+          input: { parameters: [] },
+          output: { type: 'json' },
+          handler: async () => ({}),
+          api: { method: 'POST' },
+        })
+      );
 
       const result = await generate('next-routes', registry, { outputDir: tempDir });
 
@@ -124,7 +120,7 @@ describe('Generator Plugin System', () => {
     it('should respect dryRun option', async () => {
       const result = await generate('next-routes', registry, {
         outputDir: tempDir,
-        dryRun: true
+        dryRun: true,
       });
 
       expect(result.files[0].created).toBe(false);
@@ -147,7 +143,7 @@ describe('Generator Plugin System', () => {
       await generate('mcp-server', registry, {
         outputPath,
         serverName: 'my-server',
-        serverVersion: '2.0.0'
+        serverVersion: '2.0.0',
       });
 
       const content = await fs.readFile(outputPath, 'utf-8');
@@ -160,7 +156,7 @@ describe('Generator Plugin System', () => {
       const outputPath = path.join(tempDir, 'mcp-server.ts');
       const result = await generate('mcp-server', registry, {
         outputPath,
-        dryRun: true
+        dryRun: true,
       });
 
       expect(result.files[0].created).toBe(false);
@@ -204,7 +200,7 @@ describe('Generator Plugin System', () => {
         outputPath,
         title: 'My Custom API',
         version: '2.0.0',
-        description: 'A test API'
+        description: 'A test API',
       });
 
       const content = await fs.readFile(outputPath, 'utf-8');
@@ -213,17 +209,17 @@ describe('Generator Plugin System', () => {
     });
 
     it('should include parameters for GET commands', async () => {
-      registry.register(new UniversalCommand({
-        name: 'user get',
-        description: 'Get a user',
-        input: {
-          parameters: [
-            { name: 'id', type: 'string', required: true, description: 'User ID' }
-          ]
-        },
-        output: { type: 'json' },
-        handler: async () => ({})
-      }));
+      registry.register(
+        new UniversalCommand({
+          name: 'user get',
+          description: 'Get a user',
+          input: {
+            parameters: [{ name: 'id', type: 'string', required: true, description: 'User ID' }],
+          },
+          output: { type: 'json' },
+          handler: async () => ({}),
+        })
+      );
 
       const outputPath = path.join(tempDir, 'openapi.json');
       await generate('openapi', registry, { outputPath, format: 'json' });
@@ -237,18 +233,20 @@ describe('Generator Plugin System', () => {
     });
 
     it('should include requestBody for POST commands', async () => {
-      registry.register(new UniversalCommand({
-        name: 'user create',
-        description: 'Create a user',
-        input: {
-          parameters: [
-            { name: 'name', type: 'string', required: true, description: 'User name' }
-          ]
-        },
-        output: { type: 'json' },
-        handler: async () => ({}),
-        api: { method: 'POST' }
-      }));
+      registry.register(
+        new UniversalCommand({
+          name: 'user create',
+          description: 'Create a user',
+          input: {
+            parameters: [
+              { name: 'name', type: 'string', required: true, description: 'User name' },
+            ],
+          },
+          output: { type: 'json' },
+          handler: async () => ({}),
+          api: { method: 'POST' },
+        })
+      );
 
       const outputPath = path.join(tempDir, 'openapi.json');
       await generate('openapi', registry, { outputPath, format: 'json' });
