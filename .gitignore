@@ -49,3 +49,6 @@ pnpm-debug.log*
 # Worktrees (Multi-Agent Development)
 .worktrees/
 .supernal/.metadata_never_index
+.claude/
+.supernal-local/
+tsup.config.bundled_*.mjs
