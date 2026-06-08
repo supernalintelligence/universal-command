@@ -20,7 +20,7 @@ import { CommandRegistry } from '../CommandRegistry.js';
  */
 export async function createMCPServer(
   registry: CommandRegistry,
-  config: { name: string; version: string }
+  config: { name: string; version: string; capabilities?: Record<string, unknown> }
 ) {
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { ListToolsRequestSchema, CallToolRequestSchema } =
@@ -28,7 +28,7 @@ export async function createMCPServer(
 
   const server = new Server(
     { name: config.name, version: config.version },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {}, ...config.capabilities } }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
