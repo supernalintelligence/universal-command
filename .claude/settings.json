@@ -1,0 +1,325 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sc:*)",
+      "Bash(du:*)",
+      "Read(//private/tmp/**)",
+      "Edit(**/cli/commands/secret.ts)",
+      "Write(**/cli/commands/secret.ts)",
+      "Edit(**/supernal-code-package/**)",
+      "Write(**/supernal-code-package/**)",
+      "Bash(sed * **/supernal-code-package/**)",
+      "Edit(docs/features/**)",
+      "Write(docs/features/**)",
+      "Edit(.supernal/docs/**)",
+      "Write(.supernal/docs/**)"
+    ],
+    "deny": [
+      "Read(~/.supernal/credentials/**)",
+      "Write(~/.supernal/credentials/**)",
+      "Edit(~/.supernal/credentials/**)",
+      "Read(~/.supernal/keys/**)",
+      "Write(~/.supernal/keys/**)",
+      "Edit(~/.supernal/keys/**)",
+      "Read(~/.ssh/**)",
+      "Write(~/.ssh/**)",
+      "Edit(~/.ssh/**)",
+      "Read(**/*override-instruction*)",
+      "Write(**/*override-instruction*)",
+      "Edit(**/*override-instruction*)",
+      "Read(**/*system-prompt-override*)",
+      "Write(**/*system-prompt-override*)",
+      "Edit(**/*system-prompt-override*)",
+      "Read(**/*new-orders*)",
+      "Write(**/*new-orders*)",
+      "Edit(**/*new-orders*)",
+      "Read(**/*.orders)",
+      "Write(**/*.orders)",
+      "Edit(**/*.orders)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/session-start.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/agent-session-start.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh SessionStart",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/guard-destructive-git.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/agent-policy.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/pre-build-kill.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/fix-paths.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/fix-paths.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/pre-tool-use.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/fix-paths.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/pre-tool-use.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/fix-paths.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/pre-tool-use.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/fix-paths.py"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/pre-tool-use.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PreToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-build-capture.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-build-unlock.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/cpu-saturation-kill.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-edit-typecheck.sh",
+            "timeout": 35
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PostToolUse",
+            "timeout": 35
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-edit-typecheck.sh",
+            "timeout": 35
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-spec-adversarial.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-impl-simplify.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-planning-audit.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh PostToolUse",
+            "timeout": 35
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh Stop",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/stop-hook.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/hook-telemetry-alert.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/session-end.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/board-rebuild.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh SessionEnd",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/agent-start.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh SubagentStart",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hook-runtime/runner.sh SubagentStop",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/delegate.sh hooks/post-agent-review-merge.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  },
+  "sandbox": {
+    "filesystem": {
+      "denyWrite": [
+        "~/.supernal/credentials/**",
+        "~/.supernal/keys/**",
+        "~/.ssh/**"
+      ],
+      "denyRead": [
+        "~/.supernal/credentials/**",
+        "~/.supernal/keys/**",
+        "~/.ssh/**"
+      ]
+    }
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}
