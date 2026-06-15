@@ -36,5 +36,4 @@ fi
 
 # Pass SC_DELEGATE_PARENT_ROOT so post-agent-review-merge.sh knows
 # it's running from a submodule context.
-export SC_DELEGATE_PARENT_ROOT="$PARENT_ROOT"
-exec "$TARGET" "${@:2}"
+SC_DELEGATE_PARENT_ROOT="$PARENT_ROOT" exec "$TARGET" "${@:2}"
