@@ -12,23 +12,25 @@ SUBMODULE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 YAML_FILE="$SUBMODULE_ROOT/supernal.yaml"
 
 # Read claude_hooks.parent_repo — pure grep/sed, no external yaml parser
-PARENT_REL=$(grep -A5 '^claude_hooks:' "$YAML_FILE" 2>/dev/null \\
-  | grep -E '^\\s+parent_repo:' \\
-  | head -1 \\
+PARENT_REL=$(grep -A20 '^claude_hooks:' "$YAML_FILE" 2>/dev/null \
+  | grep -E '^\s+parent_repo:' \
+  | head -1 \
   | sed -E 's/.*parent_repo:[[:space:]]*//; s/[[:space:]#].*//')
 
 if [[ -z "$PARENT_REL" ]]; then
-  echo "[delegate] WARNING: claude_hooks.parent_repo not set in $YAML_FILE — hook skipped" >&2
-  cat  # consume stdin
+  echo '{"systemMessage":"[delegate] hook skipped: claude_hooks.parent_repo not set in supernal.yaml — branch will NOT be auto-merged. Fix: add claude_hooks.parent_repo to supernal.yaml."}'
   exit 0
 fi
 
-PARENT_ROOT="$(cd "$SUBMODULE_ROOT/$PARENT_REL" && pwd)"
+if ! PARENT_ROOT="$(cd "$SUBMODULE_ROOT/$PARENT_REL" && pwd 2>/dev/null)"; then
+  echo "{\"systemMessage\":\"[delegate] hook skipped: cannot resolve parent_repo path $SUBMODULE_ROOT/$PARENT_REL — branch will NOT be auto-merged.\"}"
+  exit 0
+fi
+
 TARGET="$PARENT_ROOT/.claude/$HOOK_NAME"
 
 if [[ ! -f "$TARGET" ]]; then
-  echo "[delegate] WARNING: parent hook not found: $TARGET" >&2
-  cat
+  echo "{\"systemMessage\":\"[delegate] hook skipped: parent hook not found at $TARGET — branch will NOT be auto-merged.\"}"
   exit 0
 fi
 
