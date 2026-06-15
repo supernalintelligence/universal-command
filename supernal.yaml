@@ -71,3 +71,6 @@ director:
       daily_usd: 0.50
     global:
       daily_usd: 2.00
+
+claude_hooks:
+  parent_repo: ../..
