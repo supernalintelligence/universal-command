@@ -52,3 +52,4 @@ pnpm-debug.log*
 .claude/
 .supernal-local/
 tsup.config.bundled_*.mjs
+reports/
