@@ -293,6 +293,12 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Build execution context (P0-4, P0-5, P0-6)
         const context: ExecutionContext = {
           interface: 'cli',
+          // projectRoot is the directory the CLI was invoked from. Commands that
+          // resolve workspace-relative paths (e.g. cron stores writing
+          // .supernal/modules/crons.json) read context.projectRoot; without this
+          // the CLI path left it undefined and every such command threw
+          // "projectRoot is required". cwd is the correct invocation-dir default.
+          projectRoot: process.cwd(),
           stdout: process.stdout,
           stderr: process.stderr,
           stdin: process.stdin,

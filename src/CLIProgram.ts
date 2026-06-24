@@ -211,6 +211,7 @@ export class CLIProgram {
     return async (...args: any[]) => {
       const context: ExecutionContext = {
         interface: 'cli',
+        projectRoot: process.cwd(), // invocation dir; commands resolve workspace-relative paths from this
         globalOptions: this.program.opts(), // Include global options
       };
 
