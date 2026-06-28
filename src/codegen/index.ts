@@ -5,16 +5,17 @@
  * plugin-based generator system internally.
  */
 
-import { createRequire } from 'node:module';
 import { CommandRegistry } from '../CommandRegistry';
 
-// Create a require function that works in both ESM and CJS contexts
-const require = createRequire(import.meta.url);
-import {
-  NextRoutesGenerator,
-  MCPServerGenerator,
-  type GeneratorResult
-} from '../generators';
+// NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
+// tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
+// which is Node-only and breaks the browser/client bundle the moment a client
+// component pulls in the dashboard SDK barrel (which value-imports these classes).
+// The bare `require(...)` calls below are rewritten by esbuild to its built-in,
+// browser-safe `__require` shim (guards on `typeof require`), so they only run
+// server-side (CLI/API) and never emit a static `import 'module'`. This is the
+// proven fix for the recurring "Can't resolve 'module'" regression. See CLAUDE.md.
+import { NextRoutesGenerator, MCPServerGenerator, type GeneratorResult } from '../generators';
 
 export interface GenerateOptions {
   outputDir: string;
@@ -63,12 +64,12 @@ export async function generateMCPServer(
   await generator.generate(registry, {
     outputPath: options.outputPath,
     serverName: options.serverName,
-    serverVersion: options.serverVersion
+    serverVersion: options.serverVersion,
   });
 
   return {
     path: options.outputPath,
-    toolCount: registry.getAll().length
+    toolCount: registry.getAll().length,
   };
 }
 
