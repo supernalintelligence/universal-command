@@ -6,6 +6,7 @@
  */
 
 import { CommandRegistry } from '../CommandRegistry';
+import { nodeRequire } from '../nodeRequire';
 
 // NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
 // tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
@@ -40,7 +41,7 @@ export async function generateNextRoutes(
 export function generateCLIProgram(registry: CommandRegistry): any {
   let Command: any;
   try {
-    Command = require('commander').Command;
+    Command = nodeRequire('commander').Command;
   } catch {
     throw new Error('commander package is required. Install with: npm install commander');
   }

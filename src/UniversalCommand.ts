@@ -13,6 +13,7 @@ import type {
   Parameter,
 } from './types';
 import { ValidationError } from './errors';
+import { nodeRequire } from './nodeRequire';
 
 // NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
 // tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
@@ -195,8 +196,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     // Lazy load commander to avoid hard dependency
     let Command: any;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      Command = require('commander').Command;
+      Command = nodeRequire('commander').Command;
     } catch {
       throw new Error(
         'commander package is required for CLI generation. Install with: npm install commander'
@@ -322,8 +322,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
             options?: { default?: string; mask?: boolean }
           ) => {
             // Simple readline-based prompt
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const readline = require('readline');
+            const readline = nodeRequire('readline');
             const rl = readline.createInterface({
               input: process.stdin,
               output: process.stdout,
@@ -383,8 +382,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   static buildCommandTree(commands: UniversalCommand[]): any {
     let Command: any;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      Command = require('commander').Command;
+      Command = nodeRequire('commander').Command;
     } catch {
       throw new Error('commander package is required. Install with: npm install commander');
     }
