@@ -51,13 +51,9 @@ export async function testCLI(
       stderr: mockStderr
     });
 
-    if (command.schema.cli?.format) {
-      stdout += command.schema.cli.format(result);
-    } else if (command.schema.output.type === 'json') {
-      stdout += JSON.stringify(result, null, 2);
-    } else {
-      stdout += String(result);
-    }
+    // Route through the same formatter the real CLI uses so the harness cannot
+    // mask a formatForCLI regression.
+    stdout += command.formatForCLI(result, parsedArgs as any);
 
     return { stdout, stderr, exitCode: 0, success: true };
   } catch (error: any) {

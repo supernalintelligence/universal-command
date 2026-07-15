@@ -59,6 +59,140 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   }
 
   /**
+   * Format a command RESULT into the exact string the CLI prints.
+   *
+   * SINGLE SOURCE OF TRUTH for CLI output formatting — used by toCLI() (the
+   * framework-generated action), runCLI() (the sanctioned raw-Commander dispatch
+   * helper), and the test harness (testing/index.ts). One implementation means the
+   * three surfaces can never drift going forward.
+   *
+   * NOTE — this is NOT byte-identical to toCLI()'s PRE-EXISTING behaviour for
+   * every command: the old toCLI() text-branch did `console.log(result)`
+   * (non-string objects rendered via Node's console inspection, e.g.
+   * `{ a: 1 }`), whereas this unifies onto the (pre-existing, independently
+   * drifted) testing-harness convention. The non-string case below explicitly
+   * mirrors util.inspect rather than raw String() so an object still prints
+   * readably instead of collapsing to `[object Object]` — see the inline
+   * comment below for why plain String() was rejected during review
+   * (2026-07-15 adversarial pass, finding #1).
+   *
+   * Selection order:
+   *   1. a cli.format(result, args) callback if the command defines one;
+   *   2. JSON.stringify for output.type 'json';
+   *   3. the result AS-IS if it is already a string; util.inspect() otherwise
+   *      (readable object/array rendering — NOT String(), which would print
+   *      the useless `[object Object]` / `1,2` for objects/arrays).
+   *
+   * CAVEAT for callers relying on cli.format: if the format callback itself
+   * throws, runCLI() (below) catches it in the SAME try/catch as the handler
+   * call, so a successfully-EXECUTED command whose formatter has a bug gets
+   * reported as a FAILED command (`Error: <formatter message>`, exit non-zero)
+   * — the command's real (successful) result is discarded. This mirrors
+   * toCLI()'s pre-existing coupling; a format bug should be treated as a
+   * command bug and fixed, not silently swallowed, but be aware a formatter
+   * exception masquerades as a handler exception in the printed error.
+   */
+  formatForCLI(result: TOutput, args?: TInput): string {
+    if (this.schema.cli?.format) {
+      return this.schema.cli.format(result, args as any);
+    }
+    if (this.schema.output.type === 'json') {
+      return JSON.stringify(result, null, 2);
+    }
+    if (typeof result === 'string') {
+      return result;
+    }
+    // util.inspect (not String()) so a non-string, non-JSON result (an object,
+    // array, etc.) still renders readably instead of collapsing to
+    // "[object Object]" / "1,2" — the exact regression flagged in review.
+    return nodeRequire('util').inspect(result, { depth: null });
+  }
+
+  /**
+   * Dispatch this command from a raw Commander action, GUARANTEEING that output
+   * reaches the terminal before the process sets a non-zero exit code.
+   *
+   * WHY THIS EXISTS — the silent-exit bug class it kills.
+   * ---------------------------------------------------------------------------
+   * A raw Commander `.action()` that hand-rolls dispatch by calling
+   * `cmd.execute(args, ctx)` and then e.g. `if (!result.success) process.exit(1)`
+   * NEVER runs the command's cli.format callback — execute() only RETURNS the
+   * result object, it does not print it. So a failure encoded as a returned value
+   * (e.g. `{ success: false, message }`) shows nothing on the terminal but whatever
+   * the handler happened to log, and the process exits non-zero — a fully silent
+   * failure. This is exactly what `sc git converge` did on 2026-07-14: it printed
+   * only its header, then `process.exit(1)` with the real `result.message` never
+   * printed (git/index.ts dispatched via execute()).
+   *
+   * runCLI() is the sanctioned way for a raw Commander action to invoke a
+   * UniversalCommand. It CANNOT silently swallow output:
+   *   - On success it ALWAYS prints the formatted result (formatForCLI) to stdout
+   *     (a genuinely empty formatted string is the only thing it won't print).
+   *   - On a thrown error it ALWAYS prints `Error: <message>` to stderr.
+   *   - It maps failures to a non-zero exit via `process.exitCode` (NOT
+   *     process.exit(), which truncates buffered writes to a piped stdout/stderr
+   *     before they flush). A command that encodes failure as a returned value
+   *     supplies `opts.exitCode(result)` to derive the code; a thrown error's exit
+   *     code comes from its own mapping. Setting process.exitCode lets the event
+   *     loop drain the output, then Node exits with that code.
+   *
+   * It reports the error and sets the exit code rather than rethrowing, matching a
+   * CLI action's contract — callers just `await cmd.runCLI(...)`.
+   *
+   * ⚠️ PRECONDITION for adopters (2026-07-15 review, finding #3): runCLI uses
+   * `process.exitCode`, NOT `process.exit()`, specifically so buffered stdout/
+   * stderr writes are never truncated (that truncation IS the bug class this
+   * helper exists to kill). The tradeoff: `process.exitCode` only takes effect
+   * once the event loop naturally drains and Node exits on its own. If your
+   * command's handler leaves an open handle alive (a `setInterval`, an
+   * un-`unref()`'d child process, a live TCP/HTTP listener, an open readline
+   * interface), the process will HANG instead of exiting — where the old
+   * `process.exit()` would have force-terminated it. Every handler you route
+   * through runCLI() must close/unref anything it opens before returning, or
+   * the CLI action must call `process.exit(process.exitCode ?? 0)` itself
+   * after `await`ing runCLI() once it is certain nothing else needs to run.
+   *
+   * @returns the result on success, or undefined if the handler threw.
+   */
+  async runCLI(
+    args: TInput,
+    context: ExecutionContext,
+    opts?: {
+      /** Map a returned result to a process exit code (0 = success). */
+      exitCode?: (result: TOutput) => number;
+      /** Set false to suppress the success print (rare; error print still fires). */
+      print?: boolean;
+    }
+  ): Promise<TOutput | undefined> {
+    const shouldPrint = opts?.print !== false;
+    try {
+      const result = await this.execute(args, context);
+      if (shouldPrint) {
+        const out = this.formatForCLI(result, args);
+        // Only an empty formatted string is suppressed; any content is printed.
+        if (out !== undefined && out !== null && out !== '') {
+          console.log(out);
+        }
+      }
+      // Unconditional assignment (not just "if non-zero") — a success result
+      // must explicitly clear any stale non-zero process.exitCode a prior
+      // step in the same process may have set, not just leave it alone.
+      const code = opts?.exitCode ? opts.exitCode(result) : 0;
+      if (typeof code === 'number') {
+        process.exitCode = code;
+      }
+      return result;
+    } catch (error: any) {
+      console.error('Error:', error?.message ?? String(error));
+      const code = error?.getExitCode
+        ? error.getExitCode()
+        : (error?.details?.exitCode ?? error?.details?.status ?? 1);
+      process.exitCode = typeof code === 'number' && code !== 0 ? code : 1;
+      return undefined;
+    }
+  }
+
+  /**
    * Validate arguments against parameter schema
    */
   validateArgs(args: unknown): ValidationResult<TInput> {
@@ -352,21 +486,30 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
         const result = await this.execute(args, context);
 
-        // Format output
-        if (this.schema.cli?.format) {
-          console.log(this.schema.cli.format(result, args));
-        } else if (this.schema.output.type === 'json') {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(result);
-        }
+        // Format output via the single source of truth (formatForCLI) so the
+        // framework action, runCLI(), and the test harness can never drift.
+        console.log(this.formatForCLI(result, args));
       } catch (error: any) {
-        console.error('Error:', error.message);
+        // Write the error SYNCHRONOUSLY before process.exit below. process.exit()
+        // discards buffered async writes to a piped (non-TTY) stderr, which would
+        // truncate the message to nothing — another silent-failure vector. A
+        // successful synchronous fd write cannot be truncated by the exit below.
+        // NOTE (2026-07-15 review, finding #6): writeSync can still throw (e.g.
+        // EAGAIN on a non-blocking pipe under backpressure), in which case we fall
+        // back to the async console.error — which process.exit() CAN still
+        // truncate. This is a best-effort upgrade over the prior always-async
+        // write, not an absolute guarantee for every fd/stream configuration.
+        const msg = `Error: ${error?.message ?? String(error)}\n`;
+        try {
+          nodeRequire('fs').writeSync((process.stderr as any).fd ?? 2, msg);
+        } catch {
+          process.stderr.write(msg);
+        }
 
         // P1-7: Use proper exit code mapping
-        const exitCode = error.getExitCode
+        const exitCode = error?.getExitCode
           ? error.getExitCode()
-          : (error.details?.exitCode ?? error.details?.status ?? 1);
+          : (error?.details?.exitCode ?? error?.details?.status ?? 1);
         process.exit(exitCode);
       }
     });
