@@ -201,6 +201,15 @@ export interface MCPOptions {
 
   /** Custom tool name (default: generated from command name) */
   toolName?: string;
+
+  /**
+   * Free-form usage guidance surfaced to MCP tool consumers/documentation
+   * (e.g. parameter interplay, prerequisites, gotchas not captured by the
+   * parameter descriptions themselves). Already authored on 10+ commands in
+   * packages/agent-tools/src/email/commands/universal/ before this field was
+   * declared here — this closes that pre-existing type gap, no behavior change.
+   */
+  hints?: string[];
 }
 
 /**
