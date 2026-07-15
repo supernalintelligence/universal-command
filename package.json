@@ -76,7 +76,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src",
     "prepublishOnly": "pnpm run build && pnpm run test:ci",
-    "prepare": "husky && pnpm run build"
+    "prepare": "husky && sh scripts/ensure-refguard-hook.sh && pnpm run build"
   },
   "peerDependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",

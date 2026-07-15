@@ -1,0 +1,123 @@
+#!/bin/bash
+# ── Shared-checkout corruption guard (reference-transaction) ──────────────────
+# Lives in .husky/ because core.hooksPath=.husky (a guard in .git/hooks is ignored).
+# This fires INSIDE git after ALL shell interpretation (immune to eval/python/$var
+# obfuscation no shell tokenizer can see), so it is the last-line backstop for the
+# tokenizer-based Bash guards. It blocks:
+#   (1) creating/pointing a local main / master / session/* branch (we never keep
+#       these locally — only a stray test checkout/commit does);
+#   (2) pointing <dev> at a commit authored by a known test-fixture identity;
+#   (3) [NEW] a NON-ANCESTOR (history-rewriting) move of refs/heads/<dev> — the local
+#       ff-invariant: <dev>'s tip may only move FORWARD (old is an ancestor of new).
+#       A reset/rebase/force-move that makes new NOT a descendant of old is the churn/
+#       divergence class; block it unless SC_ALLOW_HISTORY_OP=1. This catches dynamic-
+#       payload evasions (a `git reset --hard $VAR`, an `eval`'d rewrite) that the argv
+#       tokenizer cannot statically prove.
+# Allows everything else, including DELETING main/session (new == zero), the initial
+# creation of <dev> (old == zero), and normal fast-forwards. Fail-OPEN on any error so a
+# bug here can never wedge a real commit/checkout/merge.
+#
+# PHASES: git invokes this hook with $1 in {prepared, committed, aborted}, feeding the SAME
+# 'old new ref' lines on stdin each time. Only 'prepared' can ABORT a transaction — that is
+# where the corruption GUARD runs (below). The parent-pin AUTO-BUMP (coding → nova) runs ONLY
+# in the 'committed' phase, so it fires exactly once, AFTER the ref move is final (never on a
+# ref update that then aborts). Everything else exits 0.
+
+# Resolve the dev branch from supernal.yaml git_sync.dev_branch (walk up), NOT hardcoded.
+# POSIX-sh, best-effort: on any miss, default to ian-dev (the repo's configured dev branch).
+# Defined before the phase dispatch so BOTH the guard and the bump path use it.
+_resolve_dev_branch() {
+  d=$(pwd)
+  while [ "$d" != "/" ] && [ -n "$d" ]; do
+    if [ -f "$d/supernal.yaml" ]; then
+      v=$(sed -n 's/^[[:space:]]*dev_branch:[[:space:]]*["'"'"']\{0,1\}\([^"'"'"'#[:space:]]*\).*/\1/p' "$d/supernal.yaml" 2>/dev/null | head -n1)
+      [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+      break
+    fi
+    d=$(dirname "$d")
+  done
+  printf 'ian-dev'
+}
+
+zero=0000000000000000000000000000000000000000
+
+# ── COMMITTED-PHASE: parent-pin auto-bump (coding → nova) ─────────────────────────────────────
+# The ref move is now FINAL. Fire the bump ONLY when refs/heads/<dev> is the ref that changed AND
+# it ADVANCED (fast-forward: old != zero AND old is an ancestor of new). This is TIGHTLY GATED on
+# purpose — reference-transaction fires on EVERY ref op, so an ungated `sc` call here would be a
+# severe perf regression. A non-<dev> ref update, a branch creation (old == zero), a deletion
+# (new == zero), or a non-fast-forward move → NO bump. The heavy `sc git submodule bump` is
+# backgrounded inside _sc_bump_parent_pin (which itself re-gates to MAIN-checkout + <dev>).
+if [ "$1" = "committed" ]; then
+  _rt_dev_branch=$(_resolve_dev_branch)
+  _rt_dev_ref="refs/heads/$_rt_dev_branch"
+  _rt_should_bump=0
+  while read -r old new ref; do
+    [ "$ref" = "$_rt_dev_ref" ] || continue          # only the configured dev branch
+    [ "$new" != "$zero" ] || continue                # not a deletion
+    [ "$old" != "$zero" ] || continue                # not a branch creation (no prior tip)
+    # Fast-forward advance ONLY: old must be an ancestor of new.
+    if git merge-base --is-ancestor "$old" "$new" 2>/dev/null; then
+      _rt_should_bump=1
+    fi
+  done
+  if [ "$_rt_should_bump" = "1" ]; then
+    _rt_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    _rt_lib="$_rt_root/.claude/hooks/submodule-auto-bump-lib.sh"
+    if [ -n "$_rt_root" ] && [ -f "$_rt_lib" ]; then
+      # shellcheck source=/dev/null
+      . "$_rt_lib"
+      _sc_bump_parent_pin
+    fi
+  fi
+  exit 0
+fi
+
+# Only the 'prepared' phase can abort a reference transaction — the corruption guard runs there.
+[ "$1" = "prepared" ] || exit 0
+
+block=0
+
+dev_branch=$(_resolve_dev_branch)
+dev_ref="refs/heads/$dev_branch"
+
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/main|refs/heads/master|refs/heads/session/*)
+      if [ "$new" != "$zero" ]; then
+        echo "[git-guard] BLOCKED $ref -> $new : forbidden local branch. Tests must not touch shared refs; we never keep main/master/session/* locally." >&2
+        block=1
+      fi
+      ;;
+    *)
+      # The configured dev branch (matched dynamically, not a hardcoded literal).
+      if [ "$ref" = "$dev_ref" ] && [ "$new" != "$zero" ]; then
+        # (2) test-fixture authorship guard (unchanged).
+        ae=$(git log -1 --format=%ae "$new" 2>/dev/null)
+        case "$ae" in
+          test@example.com|test@test.com|t@t.test|t@t|alice@example.com|*@test.invalid)
+            # Only block a NEW local fixture commit from a test — NOT a pull/reset to
+            # history already on origin/<dev>. Existing dev history is saturated with
+            # this fixture authorship (incl. real fix commits) and must stay reachable.
+            if ! git merge-base --is-ancestor "$new" "origin/$dev_branch" 2>/dev/null; then
+              echo "[git-guard] BLOCKED $dev_branch -> $new : NEW commit authored by test fixture <$ae>. A test wrote the shared repo; fix its isolation, do not commit here." >&2
+              block=1
+            fi
+            ;;
+        esac
+        # (3) local ff-invariant: a non-ancestor move of <dev> rewrites local history.
+        # Skip when old is zero (branch creation) or SC_ALLOW_HISTORY_OP=1 (audited override).
+        if [ "$block" = "0" ] && [ "$old" != "$zero" ] && [ "${SC_ALLOW_HISTORY_OP:-}" != "1" ]; then
+          # If old is NOT an ancestor of new, the move is a rewrite (non-fast-forward).
+          # merge-base failing (e.g. unrelated histories) is treated as a rewrite → block.
+          if ! git merge-base --is-ancestor "$old" "$new" 2>/dev/null; then
+            echo "[git-guard] BLOCKED $dev_branch $old -> $new : NON-FAST-FORWARD move rewrites local $dev_branch history (reset/rebase/force-move) — the churn/divergence class. The shared checkout is fast-forward-only. Sync with 'git pull --ff-only'; land work from a worktree ('sc git worktree finish'). Override (throwaway clone only): SC_ALLOW_HISTORY_OP=1." >&2
+            block=1
+          fi
+        fi
+      fi
+      ;;
+  esac
+done
+
+exit $block
