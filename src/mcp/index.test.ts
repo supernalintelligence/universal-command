@@ -1,0 +1,440 @@
+/**
+ * Security-focused tests for createMCPHttpApp.
+ *
+ * Context: createMCPHttpApp() exposes every command in a CommandRegistry over
+ * HTTP (used by @supernal/mcp-server's `npx @supernal/mcp-server serve --http`
+ * and multiple board mcp-server.ts entry points for Claude's remote custom
+ * connector format). Before this fix it had NO authentication at all and bound
+ * to all network interfaces by default — any anonymous network caller could
+ * invoke any registered command, including ones that trust a caller-supplied
+ * `company`/`companySlug` parameter with no independent check. These tests
+ * lock in the fail-closed fix: auth is required by default, /health stays
+ * open, and the default bind is loopback-only.
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { AddressInfo } from 'node:net';
+import { CommandRegistry } from '../CommandRegistry';
+import { UniversalCommand } from '../UniversalCommand';
+import { createMCPHttpApp } from './index';
+
+function buildRegistry(): CommandRegistry {
+  const registry = new CommandRegistry();
+  registry.register(
+    new UniversalCommand({
+      name: 'echo test',
+      description: 'Echoes back the input',
+      input: { parameters: [{ name: 'value', type: 'string', required: false }] },
+      output: { type: 'json' },
+      handler: async (args: { value?: string }) => ({ echoed: args.value ?? null }),
+    })
+  );
+  return registry;
+}
+
+const ORIGINAL_ENV_TOKEN = process.env.MCP_HTTP_TOKEN;
+
+beforeEach(() => {
+  delete process.env.MCP_HTTP_TOKEN;
+});
+
+afterEach(() => {
+  if (ORIGINAL_ENV_TOKEN === undefined) {
+    delete process.env.MCP_HTTP_TOKEN;
+  } else {
+    process.env.MCP_HTTP_TOKEN = ORIGINAL_ENV_TOKEN;
+  }
+});
+
+describe('createMCPHttpApp — fail-closed auth', () => {
+  it('throws when no authToken, no MCP_HTTP_TOKEN env var, and no explicit opt-out', async () => {
+    await expect(
+      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' })
+    ).rejects.toThrow(/refusing to start unauthenticated/i);
+  });
+
+  it('does not throw when options.authToken is provided', async () => {
+    await expect(
+      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' }, { authToken: 'secret-token' })
+    ).resolves.toBeDefined();
+  });
+
+  it('does not throw when MCP_HTTP_TOKEN env var is set', async () => {
+    process.env.MCP_HTTP_TOKEN = 'env-secret-token';
+    await expect(
+      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' })
+    ).resolves.toBeDefined();
+  });
+
+  it('does not throw when allowUnauthenticated is explicitly true', async () => {
+    await expect(
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        { allowUnauthenticated: true }
+      )
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('createMCPHttpApp — request-level enforcement', () => {
+  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  it('rejects /mcp with 401 when no Authorization header is sent', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+
+  it('rejects /mcp with 401 when the Bearer token is wrong', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer wrong-token', 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await close();
+    }
+  });
+
+  it('does not 401 /mcp when the Bearer token is correct', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer correct-token',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      });
+      // The exact response shape depends on the MCP transport; what matters for
+      // this security test is that auth did NOT reject the request.
+      expect(res.status).not.toBe(401);
+    } finally {
+      await close();
+    }
+  });
+
+  it('/health stays reachable without any Authorization header even when auth is required', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/health`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('ok');
+    } finally {
+      await close();
+    }
+  });
+
+  it('allows /mcp with no Authorization header when allowUnauthenticated is explicitly set', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { allowUnauthenticated: true }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      });
+      expect(res.status).not.toBe(401);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('createMCPHttpApp — network exposure defaults', () => {
+  it('start() binds to 127.0.0.1 by default, not all interfaces', async () => {
+    const { app, start } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token', port: 0 }
+    );
+    let capturedHost: string | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const realListen = (app as any).listen.bind(app);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (app as any).listen = (port: number, host: string, cb: (err?: unknown) => void) => {
+      capturedHost = host;
+      return realListen(port, host, cb);
+    };
+    await start(0);
+    expect(capturedHost).toBe('127.0.0.1');
+  });
+
+  it('start() respects an explicit host override', async () => {
+    const { app, start } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token', port: 0, host: '0.0.0.0' }
+    );
+    let capturedHost: string | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const realListen = (app as any).listen.bind(app);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (app as any).listen = (port: number, host: string, cb: (err?: unknown) => void) => {
+      capturedHost = host;
+      return realListen(port, host, cb);
+    };
+    await start(0);
+    expect(capturedHost).toBe('0.0.0.0');
+  });
+});
+
+describe('createMCPHttpApp — unauthenticated + non-loopback host guard', () => {
+  it('throws when allowUnauthenticated is combined with a non-loopback host and no second opt-in', async () => {
+    await expect(
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        { allowUnauthenticated: true, host: '0.0.0.0' }
+      )
+    ).rejects.toThrow(/refusing to bind an UNAUTHENTICATED server/i);
+  });
+
+  it('does not throw when the second opt-in (confirmUnauthenticatedNetworkExposure) is also set', async () => {
+    await expect(
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        {
+          allowUnauthenticated: true,
+          host: '0.0.0.0',
+          confirmUnauthenticatedNetworkExposure: true,
+        }
+      )
+    ).resolves.toBeDefined();
+  });
+
+  it('does not throw for allowUnauthenticated with the default (loopback) host', async () => {
+    await expect(
+      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' }, { allowUnauthenticated: true })
+    ).resolves.toBeDefined();
+  });
+
+  it('does not throw for a non-loopback host when auth is required (token set)', async () => {
+    await expect(
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        { authToken: 'correct-token', host: '0.0.0.0' }
+      )
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('createMCPHttpApp — CORS rejection does not leak a stack trace', () => {
+  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  it('returns a generic 403 with no stack trace for a disallowed browser Origin', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: {
+          origin: 'https://evil.example.com',
+          authorization: 'Bearer correct-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(403);
+      const text = await res.text();
+      expect(text).not.toMatch(/at\s+\S+\s+\(.*:\d+:\d+\)/); // no stack-trace-shaped line
+      expect(text).not.toContain('node_modules');
+      const body = JSON.parse(text);
+      expect(body).toEqual({ error: 'Forbidden' });
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('createMCPHttpApp — error handler distinguishes error types', () => {
+  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  it('returns 400 (not 403/500) for a malformed-JSON request body', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer correct-token', 'content-type': 'application/json' },
+        body: '{not valid json',
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body).toEqual({ error: 'Bad Request' });
+    } finally {
+      await close();
+    }
+  });
+
+  it('still returns 403 (not 400/500) for a disallowed CORS origin', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: {
+          origin: 'https://evil.example.com',
+          authorization: 'Bearer correct-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('createMCPHttpApp — error logging never leaks the raw request body', () => {
+  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  it('does not print the raw malformed body (which may contain a secret) to console.error', async () => {
+    const SENSITIVE_MARKER = 'SUPER_SECRET_TOKEN_abc123_should_never_be_logged';
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await fetch(`${url}/mcp`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer correct-token', 'content-type': 'application/json' },
+        body: `{not valid json but contains ${SENSITIVE_MARKER}`,
+      });
+      expect(res.status).toBe(400);
+
+      // Every argument logged across every console.error call, flattened to one string.
+      const loggedText = errorSpy.mock.calls
+        .flat()
+        .map((v) => (typeof v === 'string' ? v : JSON.stringify(v)))
+        .join(' ');
+      expect(loggedText).not.toContain(SENSITIVE_MARKER);
+      // Sanity check: the spy actually captured something (the error WAS logged,
+      // just without the sensitive body) — otherwise this test would pass vacuously.
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+      await close();
+    }
+  });
+});

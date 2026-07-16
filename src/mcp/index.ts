@@ -75,37 +75,157 @@ export async function createMCPServer(
  * Each POST /mcp request gets its own stateless transport instance (stateless mode,
  * sessionIdGenerator: undefined). Compatible with Claude's custom connector format.
  *
- * Also exposes GET /health → { status: 'ok', name, version } for liveness checks.
+ * Also exposes GET /health → { status: 'ok', name, version } for liveness checks
+ * (intentionally unauthenticated — no registry access, no sensitive data).
  *
  * Returns the Express app (so callers can add routes) and a `start(port)` convenience
  * method that begins listening and resolves when the server is ready.
  *
  * Works with any CommandRegistry — the whole supernal system or any individual board.
  *
- * @example
- * const { app, start } = await createMCPHttpApp(registry, { name: 'my-server', version: '0.1.0' });
- * await start(); // listens on port 3001 by default
+ * ── Security — fail-closed by default ─────────────────────────────────────────
+ * Every registered command is reachable over this transport, and command handlers
+ * routinely take a `company`/`companySlug` parameter directly from the caller with
+ * no independent authorization check (that's the CALLER's job, not the transport's).
+ * So the transport itself MUST authenticate every request:
+ *   - An auth token is REQUIRED. Pass `options.authToken`, or set the
+ *     `MCP_HTTP_TOKEN` env var. If neither is present, `createMCPHttpApp()` throws —
+ *     it will NOT silently build an unauthenticated app. Callers who genuinely want
+ *     an open (e.g. sandboxed, network-isolated) server must opt in explicitly with
+ *     `options.allowUnauthenticated: true`.
+ *   - Requests must carry `Authorization: Bearer <token>`; both sides are hashed
+ *     (SHA-256) before `timingSafeEqual`, so the comparison is fixed-length and
+ *     constant-time regardless of the submitted token's length. `/health` is exempt.
+ *   - The server binds to `127.0.0.1` by default — NOT all interfaces — so an
+ *     unauthenticated LAN/internet caller can't reach it even if the token check
+ *     were somehow bypassed. Pass `options.host` to bind elsewhere (e.g. `0.0.0.0`
+ *     behind your own reverse proxy for Claude's remote custom-connector format).
+ *   - Combining `allowUnauthenticated: true` with a non-loopback `host` — the exact
+ *     configuration this fix exists to prevent — is refused unless you ALSO pass
+ *     `options.confirmUnauthenticatedNetworkExposure: true`. Two differently-named
+ *     opt-ins can't be set by accidentally copy-pasting one flag.
+ *   - A disallowed CORS origin gets a generic 403 (no stack trace), never Express's
+ *     default error page.
  *
- * // Or bring your own port:
+ * @example
+ * const { app, start } = await createMCPHttpApp(
+ *   registry,
+ *   { name: 'my-server', version: '0.1.0' },
+ *   { authToken: randomBytes(32).toString('hex') },
+ * );
+ * await start(); // listens on 127.0.0.1:3001 by default
+ *
+ * // Or bring your own port / bind address:
  * await start(4000);
  */
 export async function createMCPHttpApp(
   registry: CommandRegistry,
   config: { name: string; version: string },
-  options?: { port?: number }
+  options?: {
+    port?: number;
+    host?: string;
+    /** Bearer token required on every request except /health. Falls back to MCP_HTTP_TOKEN env var. */
+    authToken?: string;
+    /** Explicit, audited opt-out of the fail-closed auth requirement. Default false. */
+    allowUnauthenticated?: boolean;
+    /**
+     * Second, differently-named explicit opt-in required to combine
+     * allowUnauthenticated with a non-loopback host. Default false.
+     */
+    confirmUnauthenticatedNetworkExposure?: boolean;
+  }
 ): Promise<{ app: unknown; start: (port?: number) => Promise<void> }> {
+  const { timingSafeEqual, createHash } = await import('node:crypto');
   const express = await import('express').then((m) => m.default ?? m);
   const cors = await import('cors').then((m) => m.default ?? m);
 
+  const authToken = options?.authToken ?? process.env.MCP_HTTP_TOKEN;
+  const allowUnauthenticated = options?.allowUnauthenticated === true;
+
+  // Fail closed: refuse to build a server that would accept unauthenticated
+  // requests unless the caller explicitly opted in. This mirrors the fail-loud
+  // pattern used by `sc module serve` (packages/boards/lib/module-server.ts) —
+  // no isolation/auth check defaulting silently to "off".
+  if (!authToken && !allowUnauthenticated) {
+    throw new Error(
+      '[mcp-http] refusing to start unauthenticated. Every registered command is ' +
+        'reachable over this transport, including any that trust a caller-supplied ' +
+        'company/tenant parameter. Pass options.authToken (e.g. ' +
+        'randomBytes(32).toString("hex")), or set the MCP_HTTP_TOKEN env var. ' +
+        'To run genuinely open (only for a network-isolated/sandboxed deployment), ' +
+        'pass options.allowUnauthenticated: true explicitly.'
+    );
+  }
+
+  const defaultPort = options?.port ?? 3001;
+  // Fail closed on network exposure too: bind to loopback only unless the
+  // caller explicitly asks for a different interface (e.g. 0.0.0.0 behind
+  // their own reverse proxy for Claude's remote custom-connector format).
+  const host = options?.host ?? '127.0.0.1';
+  const isLoopbackHost = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+
+  // Refuse the exact combination this fix exists to prevent: no auth AND
+  // reachable beyond loopback. A SECOND, differently-named opt-in is required
+  // so it can never be set by accident (e.g. copy-pasting allowUnauthenticated
+  // from a local-dev snippet into a deployment that also sets host: '0.0.0.0').
+  if (allowUnauthenticated && !isLoopbackHost && options?.confirmUnauthenticatedNetworkExposure !== true) {
+    throw new Error(
+      `[mcp-http] refusing to bind an UNAUTHENTICATED server to a non-loopback host ("${host}"). ` +
+        'This is the exact configuration this fix exists to prevent — every registered command ' +
+        'would be reachable by any network caller with zero auth. If you genuinely intend this ' +
+        '(e.g. a network-isolated sandbox with no real secrets), also pass ' +
+        'options.confirmUnauthenticatedNetworkExposure: true.'
+    );
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const expressApp: any = express();
-  expressApp.use(cors());
+  expressApp.use(
+    cors({
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        // Non-browser callers (curl, Claude's connector infra) send no Origin header —
+        // always allowed. Browser-originated cross-origin calls are restricted to
+        // localhost; this transport is not designed to be called from arbitrary
+        // third-party web pages.
+        if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('CORS: origin not allowed'));
+        }
+      },
+    })
+  );
   expressApp.use(express.json());
 
-  // Health endpoint — verifies the server is alive without MCP client tooling
+  // Health endpoint — verifies the server is alive without MCP client tooling.
+  // Registered BEFORE the auth middleware and intentionally unauthenticated: it
+  // exposes only non-sensitive liveness info, no registry/command access.
   expressApp.get('/health', (_req: unknown, res: { json: (body: unknown) => void }) => {
     res.json({ status: 'ok', name: config.name, version: config.version });
   });
+
+  // ── Auth middleware — applies to every route registered after this point ──
+  // Both sides are hashed to a fixed-length digest before comparison, so there is
+  // no length-based early exit and no signal about the submitted token's length.
+  if (!allowUnauthenticated) {
+    const expected = createHash('sha256').update(authToken as string).digest();
+    expressApp.use(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req: any, res: any, next: () => void) => {
+        const header = req.headers?.['authorization'] as string | undefined;
+        if (!header?.startsWith('Bearer ')) {
+          res.status(401).json({ error: 'Unauthorized' });
+          return;
+        }
+        const submitted = createHash('sha256').update(header.slice(7)).digest();
+        if (!timingSafeEqual(submitted, expected)) {
+          res.status(401).json({ error: 'Unauthorized' });
+          return;
+        }
+        next();
+      }
+    );
+  }
 
   // MCP endpoint — stateless: one transport per request
   expressApp.post('/mcp', async (req: unknown, res: unknown) => {
@@ -123,21 +243,54 @@ export async function createMCPHttpApp(
     await transport.handleRequest(req as any, res as any, (req as any).body);
   });
 
-  const defaultPort = options?.port ?? 3001;
+  // ── Error handler — MUST be registered last (Express matches by arity) ────
+  // Catches the CORS-rejection error, a malformed-JSON body from express.json(),
+  // and any other error thrown/rejected anywhere in the chain (including the
+  // async /mcp handler above) — and returns a stack-trace-free response instead
+  // of falling through to Express's default error page (which includes the
+  // stack in non-production NODE_ENV). Every error is logged server-side first
+  // so a real bug doesn't vanish silently behind a generic client response.
+  expressApp.use(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+    (err: any, _req: any, res: any, _next: any) => {
+      // Log only message/type/status/stack — NEVER the raw err object. body-parser
+      // attaches the caller's raw request body as err.body on a JSON parse failure
+      // (see http-errors' createError(400, err, { body, type })), and that body may
+      // contain a real Bearer token, company slug, or other caller-supplied secret.
+      // console.error(err) would print it verbatim to server logs.
+      console.error(`[mcp-http] ${config.name}@${config.version} request error:`, {
+        message: err?.message,
+        type: err?.type,
+        status: err?.status ?? err?.statusCode,
+        stack: err?.stack,
+      });
+      if (err instanceof SyntaxError && 'body' in err) {
+        // express.json() failed to parse the request body.
+        res.status(400).json({ error: 'Bad Request' });
+        return;
+      }
+      if (err?.message === 'CORS: origin not allowed') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      // Anything else is a genuine server-side failure (a bug in a registered
+      // command handler, an MCP transport error, etc.) — do not mislabel it as
+      // an auth/CORS problem.
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  );
 
   const start = (port?: number): Promise<void> => {
     const listenPort = port ?? defaultPort;
     return new Promise((resolve, reject) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const srv = expressApp.listen(listenPort, (err?: any) => {
-        if (err) {
-          reject(err);
-          return;
-        }
+      // Node's http.Server#listen callback takes no error argument — errors are
+      // only ever delivered via the 'error' event handled below.
+      const srv = expressApp.listen(listenPort, host, () => {
         console.log(
-          `[mcp-http] ${config.name}@${config.version} listening on http://localhost:${listenPort}/mcp`
+          `[mcp-http] ${config.name}@${config.version} listening on http://${host}:${listenPort}/mcp` +
+            (allowUnauthenticated ? ' (UNAUTHENTICATED)' : ' (Bearer token required)')
         );
-        console.log(`[mcp-http] health: http://localhost:${listenPort}/health`);
+        console.log(`[mcp-http] health: http://${host}:${listenPort}/health`);
         resolve();
       });
       srv.on('error', reject);
