@@ -82,6 +82,7 @@
     "@modelcontextprotocol/sdk": "^1.25.2",
     "commander": "^12.0.0",
     "express": "^4.0.0 || ^5.0.0",
+    "cors": "^2.8.5",
     "next": "^14.0.0 || ^15.0.0 || ^16.0.0"
   },
   "peerDependenciesMeta": {
@@ -96,6 +97,9 @@
     },
     "express": {
       "optional": true
+    },
+    "cors": {
+      "optional": true
     }
   },
   "dependencies": {
@@ -105,10 +109,14 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.10.0",
     "commander": "^12.0.0",
+    "cors": "^2.8.5",
     "eslint": "^8.55.0",
+    "express": "^5.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "next": "^16.2.4",
