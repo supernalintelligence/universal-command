@@ -1,6 +1,6 @@
 {
   "name": "@supernal/universal-command",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Define commands once, deploy to CLI, API, and MCP automatically",
   "keywords": [
