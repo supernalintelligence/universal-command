@@ -48,15 +48,11 @@ export async function createMCPServer(
       };
     }
     try {
-      const result = await command.toMCP().execute(args ?? {});
-      return {
-        content: [
-          {
-            type: 'text',
-            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      // command.toMCP().execute() already returns the full MCP CallToolResult
+      // shape ({ content: [...], isError? }) — return it directly. Re-wrapping
+      // it in another { content: [{ text: JSON.stringify(result) }] } layer
+      // (the previous behavior here) double-JSON-encodes every tool result.
+      return await command.toMCP().execute(args ?? {});
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -168,7 +164,11 @@ export async function createMCPHttpApp(
   // reachable beyond loopback. A SECOND, differently-named opt-in is required
   // so it can never be set by accident (e.g. copy-pasting allowUnauthenticated
   // from a local-dev snippet into a deployment that also sets host: '0.0.0.0').
-  if (allowUnauthenticated && !isLoopbackHost && options?.confirmUnauthenticatedNetworkExposure !== true) {
+  if (
+    allowUnauthenticated &&
+    !isLoopbackHost &&
+    options?.confirmUnauthenticatedNetworkExposure !== true
+  ) {
     throw new Error(
       `[mcp-http] refusing to bind an UNAUTHENTICATED server to a non-loopback host ("${host}"). ` +
         'This is the exact configuration this fix exists to prevent — every registered command ' +
@@ -182,7 +182,10 @@ export async function createMCPHttpApp(
   const expressApp: any = express();
   expressApp.use(
     cors({
-      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      origin: (
+        origin: string | undefined,
+        callback: (err: Error | null, allow?: boolean) => void
+      ) => {
         // Non-browser callers (curl, Claude's connector infra) send no Origin header —
         // always allowed. Browser-originated cross-origin calls are restricted to
         // localhost; this transport is not designed to be called from arbitrary
@@ -208,7 +211,9 @@ export async function createMCPHttpApp(
   // Both sides are hashed to a fixed-length digest before comparison, so there is
   // no length-based early exit and no signal about the submitted token's length.
   if (!allowUnauthenticated) {
-    const expected = createHash('sha256').update(authToken as string).digest();
+    const expected = createHash('sha256')
+      .update(authToken as string)
+      .digest();
     expressApp.use(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (req: any, res: any, next: () => void) => {

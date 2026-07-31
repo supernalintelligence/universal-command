@@ -746,6 +746,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
                 text: `Error: ${error.message}`,
               },
             ],
+            isError: true,
           };
         }
       },

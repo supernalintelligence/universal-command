@@ -55,7 +55,11 @@ describe('createMCPHttpApp — fail-closed auth', () => {
 
   it('does not throw when options.authToken is provided', async () => {
     await expect(
-      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' }, { authToken: 'secret-token' })
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        { authToken: 'secret-token' }
+      )
     ).resolves.toBeDefined();
   });
 
@@ -78,7 +82,9 @@ describe('createMCPHttpApp — fail-closed auth', () => {
 });
 
 describe('createMCPHttpApp — request-level enforcement', () => {
-  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
@@ -198,6 +204,123 @@ describe('createMCPHttpApp — request-level enforcement', () => {
   });
 });
 
+describe('createMCPHttpApp — protocol content through the real SDK transport', () => {
+  // Unlike the request-level enforcement tests above (which only assert on HTTP
+  // status codes), these exercise the actual StreamableHTTPServerTransport +
+  // Server round trip and assert on the JSON-RPC response body — so an
+  // @modelcontextprotocol/sdk upgrade that silently breaks tool listing or
+  // invocation (transport wiring, schema shape, content encoding) fails a test
+  // instead of shipping unnoticed.
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  async function mcpRequest(
+    url: string,
+    body: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const res = await fetch(`${url}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer correct-token',
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify(body),
+    });
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
+  it('tools/list returns the registered command with its real name, description, and input schema', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {},
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tools = (body as any).result?.tools;
+      expect(Array.isArray(tools)).toBe(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tool = tools.find((t: any) => t.name === 'sc_echo_test');
+      expect(tool).toBeDefined();
+      expect(tool.description).toBe('Echoes back the input');
+      expect(tool.inputSchema?.properties?.value).toBeDefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it('tools/call actually invokes the command handler and returns its real result', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'sc_echo_test', arguments: { value: 'hello-from-test' } },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = (body as any).result;
+      expect(result.isError).toBeFalsy();
+      const text = result.content?.[0]?.text;
+      expect(JSON.parse(text)).toEqual({ echoed: 'hello-from-test' });
+    } finally {
+      await close();
+    }
+  });
+
+  it('tools/call on an unknown tool name returns isError without throwing', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '0.0.1' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'sc_does_not_exist', arguments: {} },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = (body as any).result;
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0]?.text).toMatch(/Unknown tool/);
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('createMCPHttpApp — network exposure defaults', () => {
   it('start() binds to 127.0.0.1 by default, not all interfaces', async () => {
     const { app, start } = await createMCPHttpApp(
@@ -263,7 +386,11 @@ describe('createMCPHttpApp — unauthenticated + non-loopback host guard', () =>
 
   it('does not throw for allowUnauthenticated with the default (loopback) host', async () => {
     await expect(
-      createMCPHttpApp(buildRegistry(), { name: 'test', version: '0.0.1' }, { allowUnauthenticated: true })
+      createMCPHttpApp(
+        buildRegistry(),
+        { name: 'test', version: '0.0.1' },
+        { allowUnauthenticated: true }
+      )
     ).resolves.toBeDefined();
   });
 
@@ -279,7 +406,9 @@ describe('createMCPHttpApp — unauthenticated + non-loopback host guard', () =>
 });
 
 describe('createMCPHttpApp — CORS rejection does not leak a stack trace', () => {
-  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
@@ -326,7 +455,9 @@ describe('createMCPHttpApp — CORS rejection does not leak a stack trace', () =
 });
 
 describe('createMCPHttpApp — error handler distinguishes error types', () => {
-  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
@@ -389,7 +520,9 @@ describe('createMCPHttpApp — error handler distinguishes error types', () => {
 });
 
 describe('createMCPHttpApp — error logging never leaks the raw request body', () => {
-  async function listenEphemeral(app: unknown): Promise<{ url: string; close: () => Promise<void> }> {
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
