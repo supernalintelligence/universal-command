@@ -321,6 +321,175 @@ describe('createMCPHttpApp — protocol content through the real SDK transport',
   });
 });
 
+describe('createMCPHttpApp — staleness nudge (config.staleness)', () => {
+  // The caller resolves "latest" however fits its deployment (an sc mcp
+  // supervisor tick, a build-time check, etc.) and passes it in — these tests
+  // only verify createMCPHttpApp/createMCPServer surface it correctly once
+  // given, not that any resolution logic exists (there is none, by design).
+  async function listenEphemeral(
+    app: unknown
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const srv = (app as any).listen(0, '127.0.0.1', (err?: unknown) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const { port } = srv.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${port}`,
+          close: () => new Promise((res) => srv.close(() => res())),
+        });
+      });
+    });
+  }
+
+  async function mcpRequest(
+    url: string,
+    body: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const res = await fetch(`${url}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer correct-token',
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify(body),
+    });
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
+  it('surfaces an update nudge via the standard MCP `instructions` field when stale', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      {
+        name: 'test',
+        version: '1.0.0',
+        staleness: { latestVersion: '1.2.0', updateHint: 'Run: sc mcp update test' },
+      },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2026-06-18',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '0.0.1' },
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const instructions = (body as any).result?.instructions;
+      expect(instructions).toContain('1.0.0');
+      expect(instructions).toContain('1.2.0');
+      expect(instructions).toContain('Run: sc mcp update test');
+    } finally {
+      await close();
+    }
+  });
+
+  it('does not set instructions when latestVersion matches the running version', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '1.0.0', staleness: { latestVersion: '1.0.0' } },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2026-06-18',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '0.0.1' },
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((body as any).result?.instructions).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it('does not set instructions when no staleness config is passed at all', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '1.0.0' },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2026-06-18',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '0.0.1' },
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((body as any).result?.instructions).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
+  it('includes machine-readable staleness in tools/list _meta when stale', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      {
+        name: 'test',
+        version: '1.0.0',
+        staleness: { latestVersion: '1.2.0', updateHint: 'Run: sc mcp update test' },
+      },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const body = await mcpRequest(url, {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {},
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const meta = (body as any).result?._meta;
+      expect(meta?.staleness).toEqual({
+        current: '1.0.0',
+        latest: '1.2.0',
+        updateHint: 'Run: sc mcp update test',
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it('/health reflects staleness when stale', async () => {
+    const { app } = await createMCPHttpApp(
+      buildRegistry(),
+      { name: 'test', version: '1.0.0', staleness: { latestVersion: '1.2.0' } },
+      { authToken: 'correct-token' }
+    );
+    const { url, close } = await listenEphemeral(app);
+    try {
+      const res = await fetch(`${url}/health`);
+      const body = await res.json();
+      expect(body.staleness).toEqual({ current: '1.0.0', latest: '1.2.0' });
+    } finally {
+      await close();
+    }
+  });
+});
+
 describe('createMCPHttpApp — network exposure defaults', () => {
   it('start() binds to 127.0.0.1 by default, not all interfaces', async () => {
     const { app, start } = await createMCPHttpApp(
