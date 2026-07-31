@@ -22,6 +22,14 @@
 # where the corruption GUARD runs (below). The parent-pin AUTO-BUMP (coding → nova) runs ONLY
 # in the 'committed' phase, so it fires exactly once, AFTER the ref move is final (never on a
 # ref update that then aborts). Everything else exits 0.
+#
+# Explicit, narrowly-scoped escape hatch: SC_RELEASE_LOCAL_MAIN=1 lets a REAL
+# release script (e.g. apps/supernal-desktop/scripts/release-mac.sh, which is
+# specifically designed to commit+tag a version bump on main in an isolated
+# release checkout, never the shared dev checkout) do exactly that on purpose.
+# Only lifts the main/master/session/* block above — the <dev> test-fixture and
+# non-fast-forward checks below are untouched by this var, since those
+# protections are orthogonal.
 
 # Resolve the dev branch from supernal.yaml git_sync.dev_branch (walk up), NOT hardcoded.
 # POSIX-sh, best-effort: on any miss, default to ian-dev (the repo's configured dev branch).
@@ -84,8 +92,8 @@ dev_ref="refs/heads/$dev_branch"
 while read -r old new ref; do
   case "$ref" in
     refs/heads/main|refs/heads/master|refs/heads/session/*)
-      if [ "$new" != "$zero" ]; then
-        echo "[git-guard] BLOCKED $ref -> $new : forbidden local branch. Tests must not touch shared refs; we never keep main/master/session/* locally." >&2
+      if [ "$new" != "$zero" ] && [ "${SC_RELEASE_LOCAL_MAIN:-}" != "1" ]; then
+        echo "[git-guard] BLOCKED $ref -> $new : forbidden local branch. Tests must not touch shared refs; we never keep main/master/session/* locally. If this is a real release script committing to main on purpose (e.g. release-mac.sh), set SC_RELEASE_LOCAL_MAIN=1." >&2
         block=1
       fi
       ;;

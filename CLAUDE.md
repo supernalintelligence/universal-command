@@ -135,3 +135,5 @@ This package is a **git submodule** within the [supernal-coding](https://github.
 - `repotype validate` — repo structure validation
 
 **Parent docs:** See the root [CLAUDE.md](../../CLAUDE.md) and [/supernal/CLAUDE.md](../../../CLAUDE.md) for monorepo-wide conventions and the full sub-repo map.
+
+@~/.claude/skills/no-pr-direct-push.md
