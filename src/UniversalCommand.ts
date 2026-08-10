@@ -392,7 +392,23 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       // Provide a parseArg coercion function for numeric params so Commander
       // delivers a number to the action handler (not a raw string), which
       // allows validateType to pass without "Must be a number" errors.
-      const parseArg = param.type === 'number' ? (v: string) => Number(v) : undefined;
+      //
+      // array-type params need the same treatment for a different reason:
+      // without a custom fn, Commander's default option behavior for a
+      // repeated flag (`--where a --where b`) is "last value wins" — it
+      // hands the handler the raw STRING "b", and validateType's
+      // `Array.isArray(value)` then always fails with "Must be an array"
+      // ("Invalid command arguments" at the execute() layer), so ANY
+      // array-type parameter was unusable from the CLI surface before this
+      // fix (confirmed: state.universal.ts's `paths` param had the same
+      // latent bug). Commander's documented "collect" pattern accumulates
+      // each occurrence into an array instead of overwriting.
+      const parseArg =
+        param.type === 'number'
+          ? (v: string) => Number(v)
+          : param.type === 'array'
+            ? (v: string, previous: string[] = []) => previous.concat([v])
+            : undefined;
 
       if (param.required && !isBoolean) {
         cmd.requiredOption(flags, param.description, parseArg);
@@ -730,6 +746,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
                 text: `Error: ${error.message}`,
               },
             ],
+            isError: true,
           };
         }
       },

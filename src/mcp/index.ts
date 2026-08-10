@@ -8,6 +8,38 @@
 import { CommandRegistry } from '../CommandRegistry.js';
 
 /**
+ * Caller-supplied version-staleness info for an MCP server. The package never
+ * fetches "latest" itself (no network I/O on server construction, no
+ * assumption every server is npm-published) — the caller resolves
+ * `latestVersion` however fits its own deployment (an `sc mcp` supervisor
+ * tick, a build-time check, a cron) and passes the result in.
+ */
+export interface StalenessInfo {
+  /** The newest known version, however the caller determined it. */
+  latestVersion: string;
+  /** Optional human-readable update instructions surfaced to the calling agent. */
+  updateHint?: string;
+}
+
+export interface MCPServerConfig {
+  name: string;
+  version: string;
+  capabilities?: Record<string, unknown>;
+  /** When latestVersion !== version, nudges the calling agent to update (see StalenessInfo). */
+  staleness?: StalenessInfo;
+}
+
+function stalenessNotice(config: MCPServerConfig): string | undefined {
+  const s = config.staleness;
+  if (!s || s.latestVersion === config.version) return undefined;
+  return (
+    `⚠️ ${config.name} is running an outdated version (${config.version}); ` +
+    `${s.latestVersion} is available.` +
+    (s.updateHint ? ` ${s.updateHint}` : '')
+  );
+}
+
+/**
  * Create an MCP server from a CommandRegistry.
  * Returns the server instance — call `server.connect(transport)` to start.
  *
@@ -17,18 +49,28 @@ import { CommandRegistry } from '../CommandRegistry.js';
  * const server = await createMCPServer(registry, { name: 'my-server', version: '0.1.0' });
  * const transport = new StdioServerTransport();
  * await server.connect(transport);
+ *
+ * @example With a staleness nudge (surfaced via the standard MCP `instructions`
+ * field, shown to the calling agent/model once per session — not per tool call):
+ * const server = await createMCPServer(registry, {
+ *   name: 'my-server',
+ *   version: '1.2.0',
+ *   staleness: { latestVersion: '1.3.0', updateHint: 'Run: sc mcp update my-server' },
+ * });
  */
-export async function createMCPServer(
-  registry: CommandRegistry,
-  config: { name: string; version: string; capabilities?: Record<string, unknown> }
-) {
+export async function createMCPServer(registry: CommandRegistry, config: MCPServerConfig) {
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { ListToolsRequestSchema, CallToolRequestSchema } =
     await import('@modelcontextprotocol/sdk/types.js');
 
+  const notice = stalenessNotice(config);
+
   const server = new Server(
     { name: config.name, version: config.version },
-    { capabilities: { tools: {}, ...config.capabilities } }
+    {
+      capabilities: { tools: {}, ...config.capabilities },
+      ...(notice ? { instructions: notice } : {}),
+    }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -36,6 +78,20 @@ export async function createMCPServer(
       const t = cmd.toMCP();
       return { name: t.name, description: t.description, inputSchema: t.inputSchema };
     }),
+    // _meta is the standard MCP extension point for out-of-band info; harmless
+    // for clients that ignore it, useful for anything that reads it
+    // programmatically (e.g. `sc mcp health`) instead of parsing `instructions`.
+    ...(notice && config.staleness
+      ? {
+          _meta: {
+            staleness: {
+              current: config.version,
+              latest: config.staleness.latestVersion,
+              updateHint: config.staleness.updateHint,
+            },
+          },
+        }
+      : {}),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -48,15 +104,11 @@ export async function createMCPServer(
       };
     }
     try {
-      const result = await command.toMCP().execute(args ?? {});
-      return {
-        content: [
-          {
-            type: 'text',
-            text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-          },
-        ],
-      };
+      // command.toMCP().execute() already returns the full MCP CallToolResult
+      // shape ({ content: [...], isError? }) — return it directly. Re-wrapping
+      // it in another { content: [{ text: JSON.stringify(result) }] } layer
+      // (the previous behavior here) double-JSON-encodes every tool result.
+      return await command.toMCP().execute(args ?? {});
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -120,7 +172,7 @@ export async function createMCPServer(
  */
 export async function createMCPHttpApp(
   registry: CommandRegistry,
-  config: { name: string; version: string },
+  config: MCPServerConfig,
   options?: {
     port?: number;
     host?: string;
@@ -168,7 +220,11 @@ export async function createMCPHttpApp(
   // reachable beyond loopback. A SECOND, differently-named opt-in is required
   // so it can never be set by accident (e.g. copy-pasting allowUnauthenticated
   // from a local-dev snippet into a deployment that also sets host: '0.0.0.0').
-  if (allowUnauthenticated && !isLoopbackHost && options?.confirmUnauthenticatedNetworkExposure !== true) {
+  if (
+    allowUnauthenticated &&
+    !isLoopbackHost &&
+    options?.confirmUnauthenticatedNetworkExposure !== true
+  ) {
     throw new Error(
       `[mcp-http] refusing to bind an UNAUTHENTICATED server to a non-loopback host ("${host}"). ` +
         'This is the exact configuration this fix exists to prevent — every registered command ' +
@@ -182,7 +238,10 @@ export async function createMCPHttpApp(
   const expressApp: any = express();
   expressApp.use(
     cors({
-      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      origin: (
+        origin: string | undefined,
+        callback: (err: Error | null, allow?: boolean) => void
+      ) => {
         // Non-browser callers (curl, Claude's connector infra) send no Origin header —
         // always allowed. Browser-originated cross-origin calls are restricted to
         // localhost; this transport is not designed to be called from arbitrary
@@ -201,14 +260,24 @@ export async function createMCPHttpApp(
   // Registered BEFORE the auth middleware and intentionally unauthenticated: it
   // exposes only non-sensitive liveness info, no registry/command access.
   expressApp.get('/health', (_req: unknown, res: { json: (body: unknown) => void }) => {
-    res.json({ status: 'ok', name: config.name, version: config.version });
+    const notice = stalenessNotice(config);
+    res.json({
+      status: 'ok',
+      name: config.name,
+      version: config.version,
+      ...(notice && config.staleness
+        ? { staleness: { current: config.version, latest: config.staleness.latestVersion } }
+        : {}),
+    });
   });
 
   // ── Auth middleware — applies to every route registered after this point ──
   // Both sides are hashed to a fixed-length digest before comparison, so there is
   // no length-based early exit and no signal about the submitted token's length.
   if (!allowUnauthenticated) {
-    const expected = createHash('sha256').update(authToken as string).digest();
+    const expected = createHash('sha256')
+      .update(authToken as string)
+      .digest();
     expressApp.use(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (req: any, res: any, next: () => void) => {
