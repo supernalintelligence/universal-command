@@ -12,21 +12,17 @@
  * Source: Josh Bavari's blog, Alex Ramsdell's blog on lazy CLI loading
  */
 
-import type {
-  CommandSchema,
-  ExecutionContext,
-  
-  MCPToolDefinition,
-  NextAPIRoute,
-} from './types';
+import type { CommandSchema, ExecutionContext, MCPToolDefinition, NextAPIRoute } from './types';
 import { UniversalCommand } from './UniversalCommand';
 import { ValidationError } from './errors';
 
 /**
  * Lazy command schema where handler is a path to load, not actual function
  */
-export interface LazyCommandSchema<TInput = any, TOutput = any>
-  extends Omit<CommandSchema<TInput, TOutput>, 'handler'> {
+export interface LazyCommandSchema<TInput = any, TOutput = any> extends Omit<
+  CommandSchema<TInput, TOutput>,
+  'handler'
+> {
   /**
    * Path to module containing handler (for lazy loading)
    * Example: './commands/git/commit' or '@/commands/deploy'
@@ -78,9 +74,11 @@ export class LazyUniversalCommand<TInput = any, TOutput = any> extends Universal
     // Create schema with stub handler for parent class
     const schema: CommandSchema<TInput, TOutput> = {
       ...lazySchema,
-      handler: lazySchema.handler || (async () => {
-        throw new Error('Handler not loaded yet');
-      }),
+      handler:
+        lazySchema.handler ||
+        (async () => {
+          throw new Error('Handler not loaded yet');
+        }),
     };
 
     super(schema);
@@ -122,8 +120,13 @@ export class LazyUniversalCommand<TInput = any, TOutput = any> extends Universal
       // Try dynamic import first (ESM), fall back to require (CJS)
       let module: any;
       try {
-        // Use dynamic import for ESM
-        module = await import(this.handlerPath);
+        // Use dynamic import for ESM. this.handlerPath is a runtime-resolved
+        // file path (CLI lazy command loading) that no bundler can statically
+        // analyze -- turbopackIgnore tells Turbopack to leave it as a native
+        // dynamic import instead of warning "Can't resolve <dynamic>".
+        module = await import(
+          /* webpackIgnore: true */ /* turbopackIgnore: true */ this.handlerPath
+        );
       } catch (importError: any) {
         // Fall back to require for CJS
         try {
@@ -150,7 +153,9 @@ export class LazyUniversalCommand<TInput = any, TOutput = any> extends Universal
       (this.schema as any).handler = handler;
       this.handlerLoaded = true;
     } catch (error: any) {
-      this.loadError = new Error(`Failed to load handler from ${this.handlerPath}: ${error.message}`);
+      this.loadError = new Error(
+        `Failed to load handler from ${this.handlerPath}: ${error.message}`
+      );
       throw this.loadError;
     }
   }
@@ -162,10 +167,7 @@ export class LazyUniversalCommand<TInput = any, TOutput = any> extends Universal
     // Validate BEFORE loading handler (fail fast!)
     const validation = this.validateArgs(args);
     if (!validation.valid) {
-      throw new ValidationError(
-        'Invalid command arguments',
-        validation.errors || []
-      );
+      throw new ValidationError('Invalid command arguments', validation.errors || []);
     }
 
     // Lazy load handler AFTER validation
