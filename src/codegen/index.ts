@@ -8,6 +8,11 @@
 import { CommandRegistry } from '../CommandRegistry';
 import { nodeRequire } from '../nodeRequire';
 
+export interface GenerateOptions {
+  outputDir: string;
+  typescript?: boolean;
+}
+
 // NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
 // tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
 // which is Node-only and breaks the browser/client bundle the moment a client
@@ -16,24 +21,6 @@ import { nodeRequire } from '../nodeRequire';
 // browser-safe `__require` shim (guards on `typeof require`), so they only run
 // server-side (CLI/API) and never emit a static `import 'module'`. This is the
 // proven fix for the recurring "Can't resolve 'module'" regression. See CLAUDE.md.
-import { NextRoutesGenerator, MCPServerGenerator, type GeneratorResult } from '../generators';
-
-export interface GenerateOptions {
-  outputDir: string;
-  typescript?: boolean;
-}
-
-/**
- * Generate Next.js API routes from registry
- * @deprecated Use generators directly: generate('next-routes', registry, options)
- */
-export async function generateNextRoutes(
-  registry: CommandRegistry,
-  options: GenerateOptions
-): Promise<GeneratorResult> {
-  const generator = new NextRoutesGenerator();
-  return generator.generate(registry, options);
-}
 
 /**
  * Generate CLI program from registry
@@ -51,27 +38,6 @@ export function generateCLIProgram(registry: CommandRegistry): any {
     program.addCommand(cmd.toCLI());
   }
   return program;
-}
-
-/**
- * Generate MCP server file from registry
- * @deprecated Use generators directly: generate('mcp-server', registry, options)
- */
-export async function generateMCPServer(
-  registry: CommandRegistry,
-  options: { outputPath: string; serverName?: string; serverVersion?: string }
-): Promise<{ path: string; toolCount: number }> {
-  const generator = new MCPServerGenerator();
-  await generator.generate(registry, {
-    outputPath: options.outputPath,
-    serverName: options.serverName,
-    serverVersion: options.serverVersion,
-  });
-
-  return {
-    path: options.outputPath,
-    toolCount: registry.getAll().length,
-  };
 }
 
 // Re-export generator utilities

@@ -36,7 +36,7 @@ src/
   HelpGenerator.ts      # Help text generation
   formatting.ts         # Output formatting utilities
   codegen/
-    index.ts            # Code generation: generateNextRoutes(), generateCLIProgram(), generateMCPServer()
+    index.ts            # Code generation: generateCLIProgram() (see generators/ for next-routes/mcp-server)
   generators/           # Plugin-based generator system (NextRoutesGenerator, MCPServerGenerator)
   mcp/
     index.ts            # createMCPServer() from CommandRegistry
@@ -118,7 +118,7 @@ Every `UniversalCommand` emits four surfaces from one definition:
 - Do NOT import commander/next/@modelcontextprotocol at top level -- always lazy-load in methods
 - The `execute()` method validates args before calling handler -- do not skip validation
 - When adding a new entry point, update both `tsup.config.ts` (entry) and `package.json` (exports)
-- `generateNextRoutes` and `generateMCPServer` in codegen are deprecated -- use the generators module directly
+- Use the generators module directly (`generate('next-routes', ...)`, `generate('mcp-server', ...)`) -- the old `generateNextRoutes`/`generateMCPServer` wrappers in codegen were removed as dead code (zero real callers)
 
 ---
 
