@@ -504,7 +504,13 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
         // Format output via the single source of truth (formatForCLI) so the
         // framework action, runCLI(), and the test harness can never drift.
-        console.log(this.formatForCLI(result, args));
+        // Only an empty formatted string is suppressed (mirrors runCLI's own
+        // guard) — a handler that already printed its own CLI-only output
+        // (via cli.format returning '') must not get a second, raw dump here.
+        const formatted = this.formatForCLI(result, args);
+        if (formatted !== undefined && formatted !== null && formatted !== '') {
+          console.log(formatted);
+        }
       } catch (error: any) {
         // Write the error SYNCHRONOUSLY before process.exit below. process.exit()
         // discards buffered async writes to a piped (non-TTY) stderr, which would
