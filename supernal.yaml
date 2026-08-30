@@ -74,3 +74,8 @@ director:
 
 claude_hooks:
   parent_repo: ../..
+
+git_sync:
+  dev_branch: ian-dev
+  protected_branches:
+    - main
