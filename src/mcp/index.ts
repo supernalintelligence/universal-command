@@ -324,6 +324,13 @@ export async function createMCPHttpApp(
   expressApp.post('/mcp', async (req: unknown, res: unknown) => {
     const { StreamableHTTPServerTransport } =
       await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+    // enableJsonResponse: true means a command's `context.stream` progress
+    // notifications (UniversalCommand.ts's toMCP()) are silently NOT sent over
+    // this transport — the SDK's JSON-response mode only writes the final
+    // result, never intermediate notifications/progress messages (confirmed by
+    // adversarial review, 2026-08-30). Streaming (`output.type: 'stream'`)
+    // still works correctly end-to-end over stdio/InMemoryTransport; it just
+    // has no observable effect for a caller connected through this HTTP route.
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

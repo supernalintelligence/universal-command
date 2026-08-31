@@ -852,4 +852,70 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
       await server.close();
     }
   });
+
+  it('a failing sendNotification never becomes an uncaught exception (crash-bug regression, 2026-08-30)', async () => {
+    // Adversarial review found: the internal Writable's write callback
+    // correctly forwards a sendNotification rejection to streamToFinish.end()'s
+    // callback, but Node ALSO emits a separate 'error' event on that Writable
+    // whenever a write callback receives an error — and with no 'error'
+    // listener attached, that event was an uncaught exception, capable of
+    // crashing the whole process (every other in-flight MCP request included),
+    // not just this one call. Reproduce by closing the client transport mid-
+    // stream so a later write's sendNotification call rejects, and assert the
+    // process-level 'uncaughtException' handler is never invoked.
+    const uncaught: unknown[] = [];
+    const onUncaught = (err: unknown) => uncaught.push(err);
+    process.on('uncaughtException', onUncaught);
+
+    try {
+      const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const registry = new CommandRegistry();
+      let handlerDone: () => void = () => {};
+      const handlerFinished = new Promise<void>((resolve) => {
+        handlerDone = resolve;
+      });
+      registry.register(
+        new UniversalCommand({
+          name: 'stream crash test',
+          description: 'Writes a chunk after the client has disconnected',
+          input: { parameters: [] },
+          output: { type: 'stream' },
+          handler: async (_args, context) => {
+            // Give the test time to close the client transport before this
+            // write fires, so its sendNotification call has a real transport
+            // to fail against.
+            await new Promise((r) => setTimeout(r, 20));
+            context.stream!.write('this write races a closed transport');
+            handlerDone();
+            return { streamed: 1 };
+          },
+        })
+      );
+      const server = await createMCPServer(registry, {
+        name: 'crash-test-server',
+        version: '0.0.1',
+      });
+      const client = new Client({ name: 'crash-test-client', version: '0.0.1' });
+
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const callPromise = client
+        .callTool({ name: 'sc_stream_crash_test', arguments: {} }, undefined, {
+          onprogress: () => {},
+        })
+        .catch((err: unknown) => err); // either outcome is fine, we're testing for no crash
+
+      await client.close();
+      await handlerFinished;
+      await callPromise;
+      await server.close();
+
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  });
 });

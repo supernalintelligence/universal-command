@@ -784,42 +784,60 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           // identical to the pre-fix behavior. toTool() (a different surface)
           // still explicitly rejects streaming commands, unchanged.
           const { Writable } = nodeRequire('stream');
+          // A Writable that is given an error via its write callback ALSO emits
+          // a Node 'error' event — if nothing is listening for it, that event
+          // becomes an uncaught exception that crashes the whole process, not
+          // just this one call (a well-known Node stream gotcha, confirmed by
+          // adversarial review: a single failed sendNotification — a client
+          // disconnect, transport backpressure — could otherwise take down
+          // every other in-flight MCP request on this server). The real error
+          // is still delivered to the caller via streamToFinish.end()'s own
+          // callback below; this listener exists ONLY to stop it from also
+          // propagating as an uncaught 'error' event.
+          const suppressUncaughtStreamError = (stream: InstanceType<typeof Writable>) => {
+            stream.on('error', () => {});
+            return stream;
+          };
           if (this.schema.output.type === 'stream') {
             const progressToken = extra?.meta?.progressToken;
             if (extra?.sendNotification && progressToken !== undefined) {
               const sendNotification = extra.sendNotification;
               let sequence = 0;
-              context.stream = new Writable({
-                write(chunk: unknown, _encoding: string, callback: (error?: Error | null) => void) {
-                  sequence += 1;
-                  sendNotification({
-                    method: 'notifications/progress',
-                    params: {
-                      progressToken,
-                      progress: sequence,
-                      message:
-                        typeof chunk === 'string'
-                          ? chunk
-                          : Buffer.isBuffer(chunk)
-                            ? chunk.toString()
-                            : String(chunk),
-                    },
-                  }).then(
-                    () => callback(),
-                    (err: unknown) => callback(err instanceof Error ? err : new Error(String(err)))
-                  );
-                },
-              });
+              context.stream = suppressUncaughtStreamError(
+                new Writable({
+                  write(chunk: unknown, _encoding: string, callback: (error?: Error | null) => void) {
+                    sequence += 1;
+                    sendNotification({
+                      method: 'notifications/progress',
+                      params: {
+                        progressToken,
+                        progress: sequence,
+                        message:
+                          typeof chunk === 'string'
+                            ? chunk
+                            : Buffer.isBuffer(chunk)
+                              ? chunk.toString()
+                              : String(chunk),
+                      },
+                    }).then(
+                      () => callback(),
+                      (err: unknown) => callback(err instanceof Error ? err : new Error(String(err)))
+                    );
+                  },
+                })
+              );
             } else {
-              context.stream = new Writable({
-                write(
-                  _chunk: unknown,
-                  _encoding: string,
-                  callback: (error?: Error | null) => void
-                ) {
-                  callback();
-                },
-              });
+              context.stream = suppressUncaughtStreamError(
+                new Writable({
+                  write(
+                    _chunk: unknown,
+                    _encoding: string,
+                    callback: (error?: Error | null) => void
+                  ) {
+                    callback();
+                  },
+                })
+              );
             }
           }
 
@@ -835,8 +853,19 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           // resolved.
           if (context.stream) {
             const streamToFinish = context.stream;
+            // Bounded, not indefinite: a hung (never-resolving, never-rejecting)
+            // sendNotification — a slow-draining transport with no clean abort,
+            // for instance — must not hang this tool call forever. 10s comfortably
+            // covers real notification round-trips; on timeout the call still
+            // completes and returns its real result, just without a guarantee
+            // every trailing progress chunk was delivered.
+            const STREAM_FLUSH_TIMEOUT_MS = 10_000;
             await new Promise<void>((resolve, reject) => {
-              streamToFinish.end((err?: Error | null) => (err ? reject(err) : resolve()));
+              const timer = setTimeout(() => resolve(), STREAM_FLUSH_TIMEOUT_MS);
+              streamToFinish.end((err?: Error | null) => {
+                clearTimeout(timer);
+                err ? reject(err) : resolve();
+              });
             });
           }
 
