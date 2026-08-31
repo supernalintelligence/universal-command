@@ -8,6 +8,7 @@ import type {
   CommandSchema,
   ExecutionContext,
   ValidationResult,
+  MCPCallExtra,
   MCPToolDefinition,
   NextAPIRoute,
   Parameter,
@@ -460,6 +461,14 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           isTTY: process.stdout.isTTY,
         };
 
+        // Optional session pass-through (meta-harness prep) — a session-owning
+        // wrapper around this CLI process can set SC_SESSION_ID so the handler
+        // knows which session it's running under. Undefined when unset — zero
+        // behavior change for every existing invocation.
+        if (process.env.SC_SESSION_ID) {
+          context.sessionId = process.env.SC_SESSION_ID;
+        }
+
         // Add streaming support if enabled (P0-4)
         if (this.schema.cli?.streaming) {
           context.stream = process.stdout;
@@ -611,11 +620,27 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Extract arguments from request
         const args = await this.extractAPIArgs(request, context);
 
-        // Execute command
-        const result = await this.execute(args, {
+        // Build execution context — optional session pass-through (meta-harness
+        // prep) — additive, no behavior change for a caller that sends neither.
+        const execContext: ExecutionContext = {
           interface: 'api',
           request,
-        });
+        };
+        const sessionIdHeader =
+          typeof request?.headers?.get === 'function'
+            ? request.headers.get('x-session-id')
+            : request?.headers?.['x-session-id'];
+        if (sessionIdHeader) {
+          execContext.sessionId = Array.isArray(sessionIdHeader)
+            ? sessionIdHeader[0]
+            : sessionIdHeader;
+        }
+        if (request?.session) {
+          execContext.session = request.session;
+        }
+
+        // Execute command
+        const result = await this.execute(args, execContext);
 
         // Create response
         let NextResponse: any;
@@ -732,9 +757,88 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       name: toolName,
       description: this.schema.description,
       inputSchema: this.parametersToJSONSchema(),
-      execute: async (args: any) => {
+      execute: async (args: any, extra?: MCPCallExtra) => {
         try {
-          const result = await this.execute(args, { interface: 'mcp' });
+          const context: ExecutionContext = { interface: 'mcp' };
+          if (extra?.sessionId !== undefined) {
+            context.sessionId = extra.sessionId;
+          }
+
+          // Real MCP progress notifications (fixes the prior silent-collapse bug).
+          // For a command that declares output.type: 'stream', context.stream is
+          // ALWAYS populated — mirroring toCLI()'s contract where `cli.streaming:
+          // true` always sets context.stream to process.stdout, regardless of
+          // transport capability — so a streaming handler never has to guard
+          // `if (context.stream)` before writing:
+          //   - when the caller supplied BOTH a real sendNotification and a
+          //     progressToken (mirrors the SDK's own
+          //     `extra._meta?.progressToken !== undefined` gate — see
+          //     @modelcontextprotocol/sdk's examples/server/progressExample.ts),
+          //     each chunk written is relayed as a real
+          //     `notifications/progress` MCP notification;
+          //   - otherwise (no progress-capable caller/transport), writes go to a
+          //     no-op sink — the handler still runs exactly the same, its writes
+          //     are just not observable to this particular caller.
+          // A NON-streaming command (output.type !== 'stream') is completely
+          // unaffected either way — no context.stream, one final JSON blob,
+          // identical to the pre-fix behavior. toTool() (a different surface)
+          // still explicitly rejects streaming commands, unchanged.
+          const { Writable } = nodeRequire('stream');
+          if (this.schema.output.type === 'stream') {
+            const progressToken = extra?.meta?.progressToken;
+            if (extra?.sendNotification && progressToken !== undefined) {
+              const sendNotification = extra.sendNotification;
+              let sequence = 0;
+              context.stream = new Writable({
+                write(chunk: unknown, _encoding: string, callback: (error?: Error | null) => void) {
+                  sequence += 1;
+                  sendNotification({
+                    method: 'notifications/progress',
+                    params: {
+                      progressToken,
+                      progress: sequence,
+                      message:
+                        typeof chunk === 'string'
+                          ? chunk
+                          : Buffer.isBuffer(chunk)
+                            ? chunk.toString()
+                            : String(chunk),
+                    },
+                  }).then(
+                    () => callback(),
+                    (err: unknown) => callback(err instanceof Error ? err : new Error(String(err)))
+                  );
+                },
+              });
+            } else {
+              context.stream = new Writable({
+                write(
+                  _chunk: unknown,
+                  _encoding: string,
+                  callback: (error?: Error | null) => void
+                ) {
+                  callback();
+                },
+              });
+            }
+          }
+
+          const result = await this.execute(args, context);
+
+          // If we created a stream above, wait for every already-queued write's
+          // underlying `_write` callback to fire (i.e. every sendNotification
+          // call to resolve) before returning the final result. Without this,
+          // a handler that writes several chunks and returns immediately can
+          // race the final JSON result past its own trailing progress
+          // notifications — Node's Writable does not otherwise guarantee
+          // queued writes are flushed just because the handler's promise
+          // resolved.
+          if (context.stream) {
+            const streamToFinish = context.stream;
+            await new Promise<void>((resolve, reject) => {
+              streamToFinish.end((err?: Error | null) => (err ? reject(err) : resolve()));
+            });
+          }
 
           return {
             content: [

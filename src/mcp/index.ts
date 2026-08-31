@@ -6,6 +6,28 @@
  */
 
 import { CommandRegistry } from '../CommandRegistry.js';
+import type { MCPCallExtra } from '../types.js';
+
+/**
+ * Maps a real @modelcontextprotocol/sdk `RequestHandlerExtra` (kept loosely
+ * typed here — the SDK is a lazy-loaded, optional peer dependency; this
+ * module dynamic-imports it, never a static import) into the SDK-agnostic
+ * `MCPCallExtra` shape `UniversalCommand.toMCP()`'s `execute()` actually
+ * consumes. Extracted as its own function so the mapping itself is
+ * unit-testable without spinning up a full MCP transport.
+ */
+export function toMCPCallExtra(extra?: {
+  sessionId?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sendNotification?: (notification: any) => Promise<void>;
+  _meta?: Record<string, unknown>;
+}): MCPCallExtra {
+  return {
+    sessionId: extra?.sessionId,
+    sendNotification: extra?.sendNotification as MCPCallExtra['sendNotification'],
+    meta: extra?._meta as MCPCallExtra['meta'],
+  };
+}
 
 /**
  * Caller-supplied version-staleness info for an MCP server. The package never
@@ -94,7 +116,7 @@ export async function createMCPServer(registry: CommandRegistry, config: MCPServ
       : {}),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
     const command = registry.findByMCPName(name);
     if (!command) {
@@ -108,7 +130,9 @@ export async function createMCPServer(registry: CommandRegistry, config: MCPServ
       // shape ({ content: [...], isError? }) — return it directly. Re-wrapping
       // it in another { content: [{ text: JSON.stringify(result) }] } layer
       // (the previous behavior here) double-JSON-encodes every tool result.
-      return await command.toMCP().execute(args ?? {});
+      // The mapped `extra` carries sessionId + real progress-notification
+      // plumbing through to toMCP()'s execute() (see toMCPCallExtra above).
+      return await command.toMCP().execute(args ?? {}, toMCPCallExtra(extra));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {

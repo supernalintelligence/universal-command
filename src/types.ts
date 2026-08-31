@@ -49,8 +49,43 @@ export interface ExecutionContext {
    */
   passThroughOptions?: string[];
 
+  /**
+   * Identifies which session this execution belongs to, for simple
+   * multi-turn state (e.g. a session-owning ACP client tracking its own
+   * in-flight work as part of a future meta-harness). Optional and
+   * additive — a command that never reads it sees no behavior change.
+   * Populated from: an `SC_SESSION_ID` env var on the CLI surface, an
+   * `x-session-id` request header on the API surface, or the real MCP
+   * transport's own session id on the MCP surface (see toMCP() /
+   * MCPCallExtra below).
+   */
+  sessionId?: string;
+
+  /**
+   * The session's own key/value store, when the caller has one wired up
+   * in-process (e.g. a Next.js API route with session middleware). Not
+   * populated by toCLI() — a CLI invocation is a separate OS process, so
+   * a live store object can't cross that boundary; only sessionId (a
+   * plain string) can.
+   */
+  session?: SessionStore;
+
   /** Additional context data */
   [key: string]: any;
+}
+
+/**
+ * Minimal key/value store for session-scoped state, threaded through
+ * ExecutionContext.sessionId/session. Deliberately generic — not tied to
+ * any particular transport or session-management implementation — so a
+ * caller can back it with whatever it has: an in-memory Map, a database
+ * row, or (the motivating future use case) a session-owning ACP client
+ * exposing its own session control-plane operations (list active
+ * sessions, get status, kill a session) as UniversalCommands.
+ */
+export interface SessionStore {
+  get(key: string): unknown;
+  set(key: string, value: unknown): void;
 }
 
 /**
@@ -318,19 +353,60 @@ export interface ValidationResult<T = any> {
 }
 
 /**
+ * Minimal, SDK-agnostic subset of @modelcontextprotocol/sdk's
+ * `RequestHandlerExtra` that toMCP()'s execute() actually consumes — for
+ * real MCP progress notifications on a streaming command, and for session
+ * identification. types.ts intentionally never imports the SDK statically
+ * (it's a lazy-loaded, optional peer dependency everywhere else in this
+ * package — see UniversalCommand.ts's toCLI()/toMCP()). Callers construct
+ * this from whatever real SDK version they have wired up; see
+ * mcp/index.ts's toMCPCallExtra() for the reference mapping from a real
+ * SDK `RequestHandlerExtra`.
+ */
+export interface MCPCallExtra {
+  /** The session ID from the MCP transport, if available. */
+  sessionId?: string;
+  /**
+   * Sends a raw MCP notification tied to the in-flight tool call (e.g. a
+   * `notifications/progress` update). Transport-routing behavior — using
+   * this instead of a bare server-wide notify — matches the SDK's own
+   * `RequestHandlerExtra.sendNotification`.
+   */
+  sendNotification?: (notification: {
+    method: string;
+    params?: Record<string, unknown>;
+  }) => Promise<void>;
+  /** Metadata from the original `tools/call` request (e.g. `progressToken`). */
+  meta?: { progressToken?: string | number; [key: string]: unknown };
+}
+
+/**
  * MCP tool definition
  */
 export interface MCPToolDefinition {
   name: string;
   description: string;
   inputSchema: any; // JSONSchema
-  execute: (args: any) => Promise<{
+  execute: (
+    args: any,
+    /**
+     * Optional real-transport context — when the command declares
+     * `output.type: 'stream'` and the caller supplies both
+     * `sendNotification` and a `meta.progressToken`, chunks the handler
+     * writes to `context.stream` are emitted as real MCP progress
+     * notifications instead of being collapsed into the final JSON blob.
+     * Omitted (or missing either piece) falls back to the prior,
+     * unchanged behavior — a single final JSON result.
+     */
+    extra?: MCPCallExtra
+  ) => Promise<{
     content: Array<{
       type: 'text' | 'image' | 'resource';
       text?: string;
       data?: string;
       resource?: string;
     }>;
+    isError?: boolean;
   }>;
 }
 

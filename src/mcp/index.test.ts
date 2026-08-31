@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { CommandRegistry } from '../CommandRegistry';
 import { UniversalCommand } from '../UniversalCommand';
-import { createMCPHttpApp } from './index';
+import { createMCPHttpApp, createMCPServer, toMCPCallExtra } from './index';
 
 function buildRegistry(): CommandRegistry {
   const registry = new CommandRegistry();
@@ -737,6 +737,119 @@ describe('createMCPHttpApp — error logging never leaks the raw request body', 
     } finally {
       errorSpy.mockRestore();
       await close();
+    }
+  });
+});
+
+describe('toMCPCallExtra', () => {
+  it('maps sessionId, sendNotification, and _meta straight through', () => {
+    const sendNotification = vi.fn(async () => {});
+    const mapped = toMCPCallExtra({
+      sessionId: 'sess-1',
+      sendNotification,
+      _meta: { progressToken: 'tok-1', extra: 'field' },
+    });
+
+    expect(mapped.sessionId).toBe('sess-1');
+    expect(mapped.sendNotification).toBe(sendNotification);
+    expect(mapped.meta).toEqual({ progressToken: 'tok-1', extra: 'field' });
+  });
+
+  it('produces an all-undefined mapping when called with no extra', () => {
+    const mapped = toMCPCallExtra(undefined);
+
+    expect(mapped.sessionId).toBeUndefined();
+    expect(mapped.sendNotification).toBeUndefined();
+    expect(mapped.meta).toBeUndefined();
+  });
+});
+
+describe('createMCPServer — real MCP progress notifications end-to-end', () => {
+  // Exercises the full real stack (no mocked transport): a real SDK Client
+  // and Server connected over InMemoryTransport, a real tools/call with an
+  // onprogress callback (which makes the Client auto-populate
+  // `_meta.progressToken` — see @modelcontextprotocol/sdk's
+  // shared/protocol.ts request()), and asserts the client actually receives
+  // progress notifications for a streaming command's chunks. This is the
+  // strongest verification that toMCP()'s streaming fix (P0-4) is wired
+  // correctly against the real SDK, not just a hand-built fake `extra`.
+  function buildStreamingRegistry(chunks: string[]): CommandRegistry {
+    const registry = new CommandRegistry();
+    registry.register(
+      new UniversalCommand({
+        name: 'stream test',
+        description: 'Streams chunks then returns a result',
+        input: { parameters: [] },
+        output: { type: 'stream' },
+        handler: async (_args, context) => {
+          for (const chunk of chunks) {
+            context.stream!.write(chunk);
+          }
+          return { streamed: chunks.length };
+        },
+      })
+    );
+    return registry;
+  }
+
+  it('delivers one real progress notification per chunk, then the final JSON result', async () => {
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = await createMCPServer(buildStreamingRegistry(['first', 'second', 'third']), {
+      name: 'progress-test-server',
+      version: '0.0.1',
+    });
+    const client = new Client({ name: 'progress-test-client', version: '0.0.1' });
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    try {
+      const progressUpdates: Array<{ progress: number; message?: string }> = [];
+      const result = await client.callTool({ name: 'sc_stream_test', arguments: {} }, undefined, {
+        onprogress: (p: { progress: number; message?: string }) => {
+          progressUpdates.push({ progress: p.progress, message: p.message });
+        },
+      });
+
+      expect(progressUpdates).toEqual([
+        { progress: 1, message: 'first' },
+        { progress: 2, message: 'second' },
+        { progress: 3, message: 'third' },
+      ]);
+
+      const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text;
+      expect(JSON.parse(text as string)).toEqual({ streamed: 3 });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it('still returns a single final result with no progress notifications when the caller does not ask for progress', async () => {
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = await createMCPServer(buildStreamingRegistry(['a', 'b']), {
+      name: 'progress-test-server-2',
+      version: '0.0.1',
+    });
+    const client = new Client({ name: 'progress-test-client-2', version: '0.0.1' });
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    try {
+      // No onprogress option — the client never sets _meta.progressToken, so
+      // this exercises the exact prior (non-streaming) behavior end-to-end.
+      const result = await client.callTool({ name: 'sc_stream_test', arguments: {} });
+
+      const text = (result.content as Array<{ type: string; text?: string }>)[0]?.text;
+      expect(JSON.parse(text as string)).toEqual({ streamed: 2 });
+    } finally {
+      await client.close();
+      await server.close();
     }
   });
 });
