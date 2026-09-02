@@ -338,6 +338,19 @@ export interface CommandSchema<TInput = any, TOutput = any> {
 
   /** MCP-specific options */
   mcp?: MCPOptions;
+
+  /**
+   * Session-to-company tenancy lock (REQ-STC-101/102,
+   * .supernal/docs/specs/platform/2026-09-02-session-to-company-tenancy-implementation.md
+   * §4). Opt-in: only a command that declares this gets the check. `companyParam`
+   * names the validated input parameter (e.g. 'company', 'companySlug') carrying
+   * the requested company. execute() calls the guard registered via
+   * setTenancyGuard() with that value before invoking the handler; a
+   * `platform`-tier session (or no guard registered at all) always passes.
+   */
+  tenancy?: {
+    companyParam: string;
+  };
 }
 
 /**

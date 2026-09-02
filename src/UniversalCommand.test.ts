@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { UniversalCommand } from './UniversalCommand';
+import { UniversalCommand, setTenancyGuard, getTenancyGuard } from './UniversalCommand';
 import { ValidationError } from './errors';
 import type { MCPCallExtra } from './types';
 
@@ -622,5 +622,148 @@ describe('UniversalCommand', () => {
 
       expect(receivedSession).toBe(store);
     });
+  });
+});
+
+describe('tenancy guard (REQ-STC-101/102)', () => {
+  afterEach(() => {
+    setTenancyGuard(null);
+  });
+
+  it('runs no check when the command declares no tenancy schema, even with a guard registered', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: false, reason: 'should never be called' });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'no-tenancy',
+      description: 'No tenancy declared',
+      input: { parameters: [{ name: 'company', type: 'string', required: true }] },
+      output: { type: 'json' },
+      handler: async (args) => ({ company: args.company }),
+    });
+
+    const result = await cmd.execute({ company: 'acme' } as any, { interface: 'test' });
+    expect(result).toEqual({ company: 'acme' });
+    expect(guard).not.toHaveBeenCalled();
+  });
+
+  it('runs no check when the command declares tenancy but no guard is registered', async () => {
+    setTenancyGuard(null);
+    expect(getTenancyGuard()).toBeNull();
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-no-guard',
+      description: 'Tenancy declared, no host guard registered',
+      input: { parameters: [{ name: 'company', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'company' },
+      handler: async (args) => ({ company: args.company }),
+    });
+
+    const result = await cmd.execute({ company: 'acme' } as any, { interface: 'test' });
+    expect(result).toEqual({ company: 'acme' });
+  });
+
+  it('calls the guard with the resolved company param and allows on a positive decision', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: true });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-allow',
+      description: 'Tenancy check passes',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async (args) => ({ ok: true, companySlug: args.companySlug }),
+    });
+
+    const context = { interface: 'cli' as const, sessionId: 'sess-1' };
+    const result = await cmd.execute({ companySlug: 'acme' } as any, context);
+
+    expect(result).toEqual({ ok: true, companySlug: 'acme' });
+    expect(guard).toHaveBeenCalledWith('acme', context);
+  });
+
+  it('throws AuthorizationError and never invokes the handler on a negative decision', async () => {
+    setTenancyGuard(() => ({
+      allowed: false,
+      reason: "session locked to 'other-co', requested 'acme'",
+    }));
+
+    const handler = vi.fn().mockResolvedValue({ ok: true });
+    const cmd = new UniversalCommand({
+      name: 'tenancy-deny',
+      description: 'Tenancy check fails',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler,
+    });
+
+    await expect(cmd.execute({ companySlug: 'acme' } as any, { interface: 'cli' })).rejects.toThrow(
+      "session locked to 'other-co', requested 'acme'"
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic message when the guard omits a reason', async () => {
+    setTenancyGuard(() => ({ allowed: false }));
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-deny-no-reason',
+      description: 'Tenancy check fails with no reason',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async () => ({ ok: true }),
+    });
+
+    await expect(cmd.execute({ companySlug: 'acme' } as any, { interface: 'cli' })).rejects.toThrow(
+      /not authorized for company 'acme'/
+    );
+  });
+
+  it('supports an async guard function', async () => {
+    setTenancyGuard(async (company) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return { allowed: company === 'allowed-co' };
+    });
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-async',
+      description: 'Async guard',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async () => ({ ok: true }),
+    });
+
+    await expect(
+      cmd.execute({ companySlug: 'allowed-co' } as any, { interface: 'cli' })
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      cmd.execute({ companySlug: 'blocked-co' } as any, { interface: 'cli' })
+    ).rejects.toThrow(/not authorized/);
+  });
+
+  it('runs the tenancy check for validated data even after default-fill (companyParam picked up post-validation)', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: true });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-default',
+      description: 'Default-filled company param',
+      input: {
+        parameters: [
+          { name: 'companySlug', type: 'string', required: false, default: 'default-co' },
+        ],
+      },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async (args) => ({ companySlug: args.companySlug }),
+    });
+
+    await cmd.execute({} as any, { interface: 'cli' });
+    expect(guard).toHaveBeenCalledWith('default-co', expect.anything());
   });
 });

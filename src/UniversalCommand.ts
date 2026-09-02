@@ -13,8 +13,43 @@ import type {
   NextAPIRoute,
   Parameter,
 } from './types';
-import { ValidationError } from './errors';
+import { AuthorizationError, ValidationError } from './errors';
 import { nodeRequire } from './nodeRequire';
+
+/**
+ * Session-to-company tenancy guard (REQ-STC-101/102). A host process (the
+ * `sc` CLI, the MCP server, a dashboard API route) registers ONE guard via
+ * `setTenancyGuard()` at startup; `execute()` calls it for any command whose
+ * schema declares `tenancy.companyParam`. Deliberately host-agnostic — this
+ * package has no dependency on how session identity is actually resolved
+ * (that lives in supernal-code-package / the dashboard), only on the shape
+ * of the decision. Returning `undefined`/never calling `setTenancyGuard()`
+ * means no check runs at all (today's behavior, zero regression for a host
+ * that never registers one — e.g. a test harness or a standalone consumer
+ * of this package outside the `sc` ecosystem).
+ */
+export interface TenancyDecision {
+  allowed: boolean;
+  /** Human-readable reason, required when allowed is false. */
+  reason?: string;
+}
+
+export type TenancyGuardFn = (
+  requestedCompanySlug: string | undefined,
+  context: ExecutionContext
+) => TenancyDecision | Promise<TenancyDecision>;
+
+let tenancyGuard: TenancyGuardFn | null = null;
+
+/** Register the process-wide tenancy guard. Call once per host process at startup. */
+export function setTenancyGuard(fn: TenancyGuardFn | null): void {
+  tenancyGuard = fn;
+}
+
+/** Test/inspection helper — not part of the public contract other hosts should rely on. */
+export function getTenancyGuard(): TenancyGuardFn | null {
+  return tenancyGuard;
+}
 
 // NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
 // tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
@@ -53,6 +88,23 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     const validation = this.validateArgs(args);
     if (!validation.valid) {
       throw new ValidationError('Invalid command arguments', validation.errors || []);
+    }
+
+    // Session-to-company tenancy check (REQ-STC-101/102) — only for a command
+    // that opts in via schema.tenancy, and only when a host process has
+    // registered a guard (setTenancyGuard). Runs AFTER arg validation (a
+    // malformed request should fail as a validation error, not a tenancy
+    // error) and BEFORE the handler — the handler never runs for a rejected
+    // request.
+    if (this.schema.tenancy?.companyParam && tenancyGuard) {
+      const requestedCompany = (validation.data as any)?.[this.schema.tenancy.companyParam];
+      const decision = await tenancyGuard(requestedCompany, context);
+      if (!decision.allowed) {
+        throw new AuthorizationError(
+          decision.reason ??
+            `Command '${this.schema.name}' refused: session is not authorized for company '${requestedCompany}'.`
+        );
+      }
     }
 
     // Execute handler
@@ -805,7 +857,11 @@ export class UniversalCommand<TInput = any, TOutput = any> {
               let sequence = 0;
               context.stream = suppressUncaughtStreamError(
                 new Writable({
-                  write(chunk: unknown, _encoding: string, callback: (error?: Error | null) => void) {
+                  write(
+                    chunk: unknown,
+                    _encoding: string,
+                    callback: (error?: Error | null) => void
+                  ) {
                     sequence += 1;
                     sendNotification({
                       method: 'notifications/progress',
@@ -821,7 +877,8 @@ export class UniversalCommand<TInput = any, TOutput = any> {
                       },
                     }).then(
                       () => callback(),
-                      (err: unknown) => callback(err instanceof Error ? err : new Error(String(err)))
+                      (err: unknown) =>
+                        callback(err instanceof Error ? err : new Error(String(err)))
                     );
                   },
                 })
