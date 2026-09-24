@@ -204,15 +204,16 @@ export class LazyUniversalCommand<TInput = any, TOutput = any> extends Universal
   /**
    * Generate Next.js API route (loads handler on first request)
    */
-  override toNextAPI(): NextAPIRoute {
+  override toNextAPI(options?: Parameters<UniversalCommand['toNextAPI']>[0]): NextAPIRoute {
     const method = this.schema.api?.method || 'GET';
 
     const handler = async (request: any, context?: any) => {
       // Lazy load handler on first API request
       await this.loadHandler();
 
-      // Execute using parent class
-      return super.toNextAPI()[method as keyof NextAPIRoute]!(request, context);
+      // Execute using parent class — pass options through (e.g. authCheck)
+      // unchanged, so a lazy command with companyAuth gets the same guard.
+      return super.toNextAPI(options)[method as keyof NextAPIRoute]!(request, context);
     };
 
     return { [method]: handler } as NextAPIRoute;

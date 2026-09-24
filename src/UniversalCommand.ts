@@ -6,6 +6,7 @@
 
 import type {
   CommandSchema,
+  CompanyAuthCheckFn,
   ExecutionContext,
   ValidationResult,
   MCPCallExtra,
@@ -663,14 +664,42 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
   /**
    * Generate Next.js API route handler
+   *
+   * `options.authCheck` is required (and enforced — see below) for any
+   * command whose schema declares `companyAuth`. It is never invoked for a
+   * command without `companyAuth` — every pre-existing `toNextAPI()` caller
+   * with no `companyAuth`/`authCheck` keeps its exact current behavior.
    */
-  toNextAPI(): NextAPIRoute {
+  toNextAPI(options?: { authCheck?: CompanyAuthCheckFn }): NextAPIRoute {
     const method = this.schema.api?.method || 'GET';
 
     const handler = async (request: any, context?: any) => {
       try {
         // Extract arguments from request
         const args = await this.extractAPIArgs(request, context);
+
+        // Company-scoped HTTP authorization (opt-in via schema.companyAuth) —
+        // runs BEFORE execute() so an unauthorized caller never reaches the
+        // handler, the same guarantee a hand-rolled requireCompanyAuth()
+        // check gives. A command that declares companyAuth but is served
+        // through a toNextAPI() call with no authCheck supplied FAILS LOUD
+        // (never silently allows) — see types.ts's companyAuth doc comment.
+        if (this.schema.companyAuth) {
+          if (!options?.authCheck) {
+            throw new AuthorizationError(
+              `Command '${this.schema.name}' declares companyAuth but toNextAPI() was called with no authCheck — refusing rather than allowing an unauthorized company-scoped request.`
+            );
+          }
+          const companySlug = (args as any)?.[this.schema.companyAuth.slugParam];
+          const authExecContext: ExecutionContext = { interface: 'api', request };
+          const authResult = await options.authCheck(companySlug, request, authExecContext);
+          if (!authResult.authorized) {
+            if (authResult.response) return authResult.response;
+            throw new AuthorizationError(
+              `Not authorized for company '${companySlug ?? '(none)'}'.`
+            );
+          }
+        }
 
         // Build execution context — optional session pass-through (meta-harness
         // prep) — additive, no behavior change for a caller that sends neither.
@@ -763,10 +792,19 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       }
     }
 
-    // Extract from route params (e.g., [repoId])
+    // Extract from route params (e.g., [repoId]). paramAliases lets a route's
+    // dynamic segment name differ from the command's own parameter name
+    // (e.g. a route mounted at [slug] whose command parameter is `oldSlug`).
     if (context?.params) {
-      const params = await Promise.resolve(context.params);
-      Object.assign(args, params);
+      const params = (await Promise.resolve(context.params)) as Record<string, unknown>;
+      const aliases = this.schema.api?.paramAliases;
+      if (aliases) {
+        for (const [key, value] of Object.entries(params)) {
+          args[aliases[key] ?? key] = value;
+        }
+      } else {
+        Object.assign(args, params);
+      }
     }
 
     // Extract from request body (POST/PUT/PATCH)

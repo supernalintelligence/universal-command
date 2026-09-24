@@ -623,6 +623,141 @@ describe('UniversalCommand', () => {
       expect(receivedSession).toBe(store);
     });
   });
+
+  describe('toNextAPI — companyAuth (opt-in, injectable authCheck)', () => {
+    function fakePostRequest(body: unknown) {
+      return {
+        method: 'POST',
+        headers: { get: () => null },
+        nextUrl: { searchParams: new URLSearchParams() },
+        json: async () => body,
+      };
+    }
+
+    it('runs the handler unaffected when companyAuth is not declared, even with no authCheck', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'no-company-auth-test',
+        description: 'No companyAuth declared',
+        input: { parameters: [{ name: 'x', type: 'string', required: false }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI();
+      await route.POST!(fakePostRequest({ x: 'y' }) as any);
+
+      expect(handlerRan).toBe(true);
+    });
+
+    it('fails loud (never silently allows) when companyAuth is declared but no authCheck is supplied', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'missing-authcheck-test',
+        description: 'companyAuth declared, no authCheck wired',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI(); // no authCheck option
+      const response: any = await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(handlerRan).toBe(false);
+      expect(response.status).toBe(403);
+    });
+
+    it('returns the authCheck-supplied response verbatim and never runs the handler when unauthorized', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'auth-denied-test',
+        description: 'companyAuth declared, authCheck denies',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const deniedResponse = { marker: 'denied-response' };
+      const route = cmd.toNextAPI({
+        authCheck: async () => ({ authorized: false, response: deniedResponse }),
+      });
+      const response = await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(response).toBe(deniedResponse);
+      expect(handlerRan).toBe(false);
+    });
+
+    it('runs the handler and passes the resolved slug to authCheck when authorized', async () => {
+      let receivedCompanySlug: string | undefined;
+      const authCheckCalls: Array<string | undefined> = [];
+      const cmd = new UniversalCommand({
+        name: 'auth-allowed-test',
+        description: 'companyAuth declared, authCheck allows',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async (args) => {
+          receivedCompanySlug = args.companySlug;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI({
+        authCheck: async (companySlug) => {
+          authCheckCalls.push(companySlug);
+          return { authorized: true };
+        },
+      });
+      await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(authCheckCalls).toEqual(['acme']);
+      expect(receivedCompanySlug).toBe('acme');
+    });
+
+    it('maps a dynamic route param to a differently-named input parameter via api.paramAliases', async () => {
+      let receivedArgs: any;
+      const cmd = new UniversalCommand({
+        name: 'param-alias-test',
+        description: 'route param [slug] maps to the oldSlug input parameter',
+        input: {
+          parameters: [
+            { name: 'oldSlug', type: 'string', required: true },
+            { name: 'newSlug', type: 'string', required: true },
+          ],
+        },
+        output: { type: 'json' },
+        api: { method: 'POST', paramAliases: { slug: 'oldSlug' } },
+        companyAuth: { slugParam: 'oldSlug' },
+        handler: async (args) => {
+          receivedArgs = args;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI({
+        authCheck: async () => ({ authorized: true }),
+      });
+      const fakeContext = { params: Promise.resolve({ slug: 'acme' }) };
+      await route.POST!(fakePostRequest({ newSlug: 'acme-2' }) as any, fakeContext);
+
+      expect(receivedArgs).toEqual({ oldSlug: 'acme', newSlug: 'acme-2' });
+    });
+  });
 });
 
 describe('tenancy guard (REQ-STC-101/102)', () => {

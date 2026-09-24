@@ -222,6 +222,15 @@ export interface APIOptions {
     required: boolean;
     roles?: string[];
   };
+
+  /**
+   * Map an incoming Next.js dynamic-route param name to a different input
+   * parameter name before validation (e.g. a route mounted at
+   * `[slug]/rename` whose command parameter is named `oldSlug`). Only
+   * affects `toNextAPI()`'s `context.params` extraction — CLI/MCP surfaces
+   * are unaffected. Params with no entry here pass through unchanged.
+   */
+  paramAliases?: Record<string, string>;
 }
 
 /**
@@ -347,11 +356,77 @@ export interface CommandSchema<TInput = any, TOutput = any> {
    * the requested company. execute() calls the guard registered via
    * setTenancyGuard() with that value before invoking the handler; a
    * `platform`-tier session (or no guard registered at all) always passes.
+   *
+   * NOT the same mechanism as `companyAuth` below — this locks a single
+   * long-lived CLI/MCP *session* (identified by CLAUDE_CODE_SESSION_ID or an
+   * `x-session-id` header) to one company via a process-wide singleton
+   * (`setTenancyGuard()`). It has a NAMED, bounded gap for real browser
+   * traffic: a request that never sends `x-session-id` (i.e. essentially
+   * every real end-user browser request) resolves to "platform tier" —
+   * unrestricted — by design (see supernal-code-package's
+   * `session-tenancy-guard.ts`). It does not authenticate a real end user at
+   * all. Never rely on `tenancy` alone to authorize an HTTP mutation a real
+   * logged-in user's browser can reach — use `companyAuth` for that.
    */
   tenancy?: {
     companyParam: string;
   };
+
+  /**
+   * Per-company HTTP authorization for `.toNextAPI()` — distinct from
+   * `tenancy` above (a CLI/MCP session lock) and from `api.auth` (an unused
+   * role-based placeholder). Opt-in: declares that `slugParam` names the
+   * (already-validated) input parameter identifying the company this
+   * command reads or mutates, and that the caller must be independently
+   * authorized for that specific company before the handler runs.
+   *
+   * This package has no idea what "authorized" means for any given host
+   * (a JWT cookie, a Bearer token, session middleware) — supply that logic
+   * via `toNextAPI(options)`'s `authCheck` function (see UniversalCommand.ts
+   * `toNextAPI()` and the `CompanyAuthCheckFn` type below). A command that
+   * declares `companyAuth` but is served via a `toNextAPI()` call with no
+   * `authCheck` supplied FAILS LOUD (throws `AuthorizationError`, HTTP 403) —
+   * it never silently allows the request through.
+   *
+   * See supernal-code-package/CLAUDE.md's "Company-scoped HTTP auth for
+   * `.toNextAPI()`" section (next to the mandatory UniversalCommand rule)
+   * for the full before/after pattern this replaces.
+   */
+  companyAuth?: {
+    /** Input parameter (post `paramAliases` mapping) naming the target company slug. */
+    slugParam: string;
+  };
 }
+
+/**
+ * The result of a `CompanyAuthCheckFn` (see `toNextAPI()`'s `authCheck` option).
+ * `response` is REQUIRED when `authorized` is false — the exact HTTP response
+ * (e.g. a framework `NextResponse`) `toNextAPI()` returns verbatim, so a host
+ * can preserve its own existing 401/403 shapes byte-for-byte instead of
+ * getting a generic fallback error body.
+ */
+export interface CompanyAuthCheckResult {
+  authorized: boolean;
+  response?: any; // a Response/NextResponse-shaped value, required when authorized is false
+}
+
+/**
+ * Injectable per-company HTTP auth hook for `toNextAPI({ authCheck })`.
+ * `companySlug` is the resolved value of the command's `companyAuth.slugParam`
+ * input (may be undefined if the caller omitted it — a real authCheck should
+ * treat that as unauthorized, not skip the check). `request` is the raw
+ * request object `toNextAPI()` received (typed `any` here so this
+ * app-agnostic package never depends on `next/server`'s `NextRequest`).
+ *
+ * This package deliberately has ZERO knowledge of any specific host's auth
+ * mechanism — see `companyAuth` above. A host (e.g. the dashboard) supplies
+ * its own implementation composed from its own real auth primitives.
+ */
+export type CompanyAuthCheckFn = (
+  companySlug: string | undefined,
+  request: any,
+  context: ExecutionContext
+) => CompanyAuthCheckResult | Promise<CompanyAuthCheckResult>;
 
 /**
  * Validation result
