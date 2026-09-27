@@ -541,6 +541,36 @@ describe('UniversalCommand', () => {
     });
   });
 
+  describe('toCLI — cli.exitCode', () => {
+    const saved = process.exitCode;
+    afterEach(() => {
+      process.exitCode = saved;
+    });
+
+    function failingCmd(ok: boolean) {
+      return new UniversalCommand({
+        name: 'exit-code-test',
+        description: 'Returns a result the exitCode resolver maps',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        cli: { exitCode: (r: { ok: boolean }) => (r.ok ? 0 : 1), format: () => '' },
+        handler: async () => ({ ok }),
+      });
+    }
+
+    it('sets a non-zero process.exitCode when the resolver says the result failed', async () => {
+      process.exitCode = undefined;
+      await failingCmd(false).toCLI().parseAsync(['node', 'exit-code-test'], { from: 'node' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('leaves process.exitCode alone for a successful result', async () => {
+      process.exitCode = undefined;
+      await failingCmd(true).toCLI().parseAsync(['node', 'exit-code-test'], { from: 'node' });
+      expect(process.exitCode).toBeUndefined();
+    });
+  });
+
   describe('toNextAPI — session pass-through', () => {
     it('sets context.sessionId from an x-session-id header (Headers-style request)', async () => {
       let receivedSessionId: string | undefined;

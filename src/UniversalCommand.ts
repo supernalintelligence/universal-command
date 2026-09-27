@@ -573,6 +573,10 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         if (formatted !== undefined && formatted !== null && formatted !== '') {
           console.log(formatted);
         }
+        // cli.exitCode lets a command that returns a failure result (rather than throwing)
+        // still exit non-zero. process.exitCode, not process.exit(), so the output above flushes.
+        const exitCode = this.schema.cli?.exitCode ? this.schema.cli.exitCode(result) : 0;
+        if (exitCode !== 0) process.exitCode = exitCode;
       } catch (error: any) {
         // Write the error SYNCHRONOUSLY before process.exit below. process.exit()
         // discards buffered async writes to a piped (non-TTY) stderr, which would
