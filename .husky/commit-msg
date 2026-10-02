@@ -1,0 +1,7 @@
+#!/bin/sh
+# Runs the commit-msg checks declared in supernal.yaml git_hooks (task binding).
+if [ "${SC_SKIP_HOOKS}" = "true" ] || [ "${SC_SKIP_COMMIT_MSG}" = "true" ]; then
+  exit 0
+fi
+[ -z "$1" ] && exit 0
+exec env SC_ALLOW_STALE_BUILD=1 sc git hooks run commit-msg "$1"

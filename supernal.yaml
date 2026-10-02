@@ -25,6 +25,8 @@ testing:
 
 # Git hooks
 git_hooks:
+  # core.hooksPath this repo runs (husky 9). The task-session gate checks it.
+  hooks_path: .husky/_
   pre_commit:
     checks:
       lint_staged:

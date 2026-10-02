@@ -1,0 +1,16 @@
+#!/bin/sh
+specs=$(cat)
+# As a submodule of supernal-coding, also run the checks its gitdir delegator ran before
+# this repo declared a husky hooks path: protected-branch guard, Sc-Task trailer backstop.
+super=$(git rev-parse --show-superproject-working-tree 2>/dev/null)
+if [ -z "$super" ]; then
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  main=$(git --git-dir="$common" config --get core.worktree 2>/dev/null)
+  case "$main" in ""|/*) ;; *) main=$(cd "$common/$main" 2>/dev/null && pwd) ;; esac
+  [ -n "$main" ] && super=$(git -C "$main" rev-parse --show-superproject-working-tree 2>/dev/null)
+fi
+if [ -n "$super" ] && [ -f "$super/scripts/submodule-pre-push.sh" ]; then
+  printf "%s\n" "$specs" | bash "$super/scripts/submodule-pre-push.sh" "$@" || exit 1
+else
+  echo "pre-push: no supernal-coding superproject (standalone clone): submodule checks skipped."
+fi
