@@ -883,7 +883,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       inputSchema: this.parametersToJSONSchema(),
       execute: async (args: any, extra?: MCPCallExtra) => {
         try {
-          const context: ExecutionContext = { interface: 'mcp' };
+          const context: ExecutionContext = { interface: 'mcp', mcpToolName: toolName };
           if (extra?.sessionId !== undefined) {
             context.sessionId = extra.sessionId;
           }
@@ -892,6 +892,12 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           }
           if (extra?.callerSessionId !== undefined) {
             context.callerSessionId = extra.callerSessionId;
+          }
+          if (extra?.callerCompanySlug !== undefined) {
+            context.callerCompanySlug = extra.callerCompanySlug;
+          }
+          if (extra?.callerUserAgent !== undefined) {
+            context.callerUserAgent = extra.callerUserAgent;
           }
 
           // Real MCP progress notifications (fixes the prior silent-collapse bug).

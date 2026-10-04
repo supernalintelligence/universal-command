@@ -22,8 +22,11 @@
  *   - CLI and MCP over stdio: the process env (CLAUDE_CODE_SESSION_ID).
  *   - API (dashboard): ExecutionContext.sessionId from the x-session-id header.
  *   - MCP over HTTP: ExecutionContext.callerSessionId from X-Claude-Session-Id. One
- *     daemon serves every session, so its own env says nothing about the caller. A request
- *     with no valid header is 'unidentified' and refused anything company-scoped.
+ *     daemon serves every session, so its own env says nothing about the caller. An
+ *     X-Supernal-Company-Slug header (callerCompanySlug) locks the call to that company; it
+ *     can only add a lock, never lift one. A request with neither header is unidentified:
+ *     setUnidentifiedCallerPolicy('refuse') (the default) refuses it anything company-scoped,
+ *     'platform' lets it through as platform tier and logs it (a log-only rollout).
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -43,6 +46,38 @@ export type CompanyLockTier = 'locked' | 'platform' | 'unidentified';
 export interface CompanyLock {
   tier: CompanyLockTier;
   companySlug: string | null;
+  /** Set when an unidentified HTTP caller was let through by the 'platform' policy. */
+  unidentified?: true;
+}
+
+/** What an HTTP caller with no session identity gets. */
+export type UnidentifiedCallerPolicy = 'platform' | 'refuse';
+
+let unidentifiedCallerPolicy: UnidentifiedCallerPolicy = 'refuse';
+
+/** Set the process-wide policy for unidentified HTTP callers. Call once at host startup. */
+export function setUnidentifiedCallerPolicy(policy: UnidentifiedCallerPolicy): void {
+  unidentifiedCallerPolicy = policy;
+}
+
+export function getUnidentifiedCallerPolicy(): UnidentifiedCallerPolicy {
+  return unidentifiedCallerPolicy;
+}
+
+/** 'platform' | 'refuse' (case-insensitive), else undefined. */
+export function parseUnidentifiedCallerPolicy(
+  value: unknown
+): UnidentifiedCallerPolicy | undefined {
+  if (typeof value !== 'string') return undefined;
+  const v = value.trim().toLowerCase();
+  return v === 'platform' || v === 'refuse' ? v : undefined;
+}
+
+const COMPANY_SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** True for a company slug or id safe to accept from a request header. */
+export function isValidCompanySlug(slug: unknown): slug is string {
+  return typeof slug === 'string' && COMPANY_SLUG_PATTERN.test(slug);
 }
 
 interface SessionMapEntry {
@@ -105,10 +140,18 @@ export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): 
   if (context?.transport === 'http') {
     const spawned = process.env['SUPERNAL_COMPANY_SLUG'];
     if (spawned) return { tier: 'locked', companySlug: spawned };
-    if (!isValidSessionId(context.callerSessionId)) {
+    const headerCompany = context.callerCompanySlug;
+    // A company header asks for a lock; a malformed one must not degrade to no lock.
+    if (headerCompany !== undefined && !isValidCompanySlug(headerCompany)) {
       return { tier: 'unidentified', companySlug: null };
     }
-    return resolveCompanyLockFor(context.callerSessionId, undefined);
+    if (!isValidSessionId(context.callerSessionId)) {
+      if (headerCompany) return { tier: 'locked', companySlug: headerCompany };
+      return unidentifiedCallerPolicy === 'platform'
+        ? { tier: 'platform', companySlug: null, unidentified: true }
+        : { tier: 'unidentified', companySlug: null };
+    }
+    return resolveCompanyLockFor(context.callerSessionId, headerCompany);
   }
   if (context?.interface === 'api') return resolveRequestCompanyLock(context.sessionId);
   return resolveProcessCompanyLock();
@@ -132,8 +175,11 @@ export function currentCompanyLock(): CompanyLock {
 }
 
 /** ExecutionScopeFn for setExecutionScope(): binds the caller's lock for the whole execute(). */
-export const sessionExecutionScope: ExecutionScopeFn = (context, run) =>
-  runWithCompanyLock(resolveContextCompanyLock(context), run);
+export const sessionExecutionScope: ExecutionScopeFn = (context, run) => {
+  const lock = resolveContextCompanyLock(context);
+  noteCallerLock(lock, context);
+  return runWithCompanyLock(lock, run);
+};
 
 /**
  * True when this PROCESS runs on behalf of an agent: an automated spawn
@@ -181,8 +227,9 @@ export function createSessionTenancyGuard(
       decision = {
         allowed: false,
         reason:
-          'Refused: this MCP HTTP request carried no X-Claude-Session-Id header, so the ' +
-          'caller cannot be tied to a company. Configure the client to send it.',
+          'Refused: this MCP HTTP request carried no X-Claude-Session-Id header (or a malformed ' +
+          'X-Supernal-Company-Slug), so the caller cannot be tied to a company. Configure the ' +
+          "client's headersHelper to send it.",
       };
     } else if (!requestedCompanySlug) {
       decision =
@@ -206,32 +253,103 @@ export function createSessionTenancyGuard(
           };
     }
 
-    recordCompanyTouch(lock, sessionId, requestedCompanySlug ?? decision.resolvedCompany, decision);
+    const touched = requestedCompanySlug ?? decision.resolvedCompany;
+    if (
+      !decision.allowed ||
+      (sessionId && firstSeen(touchSeen, `${sessionId}|${lock.tier}|${touched ?? ''}`))
+    ) {
+      appendSessionLog({
+        event: 'company-touch',
+        claudeSessionId: sessionId ?? null,
+        tier: lock.tier,
+        companySlug: touched ?? null,
+        lockedCompanySlug: lock.companySlug,
+        allowed: decision.allowed,
+        reason: decision.reason,
+      });
+    }
     return decision;
   };
 }
 
-/** Never throws: an audit write failure must not block the check it records. */
-function recordCompanyTouch(
-  lock: CompanyLock,
-  claudeSessionId: string | undefined,
-  companySlug: string | undefined,
-  decision: TenancyDecision
-): void {
-  if (!claudeSessionId && decision.allowed) return;
+// What reaches session-log.ndjson: every denial, the first allowed touch of each
+// (session, tier, company) per process, each change of a session's resolved lock, and
+// unidentified callers at most once per UNIDENTIFIED_LOG_WINDOW_MS per caller.
+const SEEN_CAP = 10_000;
+const touchSeen = new Set<string>();
+const lockBySession = new Map<string, string>();
+const unidentifiedLastLog = new Map<string, { at: number; suppressed: number }>();
+export const UNIDENTIFIED_LOG_WINDOW_MS = 60_000;
+
+function firstSeen(set: Set<string>, key: string): boolean {
+  if (set.has(key)) return false;
+  if (set.size >= SEEN_CAP) set.clear();
+  set.add(key);
+  return true;
+}
+
+/** Test hook: forget what has been logged so far. */
+export function resetSessionLogDedupe(): void {
+  touchSeen.clear();
+  lockBySession.clear();
+  unidentifiedLastLog.clear();
+}
+
+function noteCallerLock(lock: CompanyLock, context: Partial<ExecutionContext> | undefined): void {
+  if (lock.tier === 'unidentified' || lock.unidentified) {
+    const caller = context?.callerUserAgent ?? 'unknown';
+    const now = Date.now();
+    const prev = unidentifiedLastLog.get(caller);
+    if (prev && now - prev.at < UNIDENTIFIED_LOG_WINDOW_MS) {
+      prev.suppressed += 1;
+      return;
+    }
+    if (unidentifiedLastLog.size >= SEEN_CAP) unidentifiedLastLog.clear();
+    unidentifiedLastLog.set(caller, { at: now, suppressed: 0 });
+    const entry = {
+      event: 'unidentified-caller',
+      claudeSessionId: null,
+      tier: 'unidentified',
+      companySlug: null,
+      lockedCompanySlug: null,
+      policy: unidentifiedCallerPolicy,
+      allowed: unidentifiedCallerPolicy === 'platform',
+      transport: context?.transport ?? null,
+      tool: context?.mcpToolName ?? null,
+      userAgent: caller,
+      suppressedSinceLast: prev?.suppressed ?? 0,
+    };
+    appendSessionLog(entry);
+    process.stderr.write(
+      `[session-tenancy] WARN unidentified MCP HTTP caller (policy=${unidentifiedCallerPolicy}, ` +
+        `tool=${entry.tool ?? '?'}, ua=${caller}, suppressed=${entry.suppressedSinceLast})\n`
+    );
+    return;
+  }
+  const sessionId =
+    context?.transport === 'http' ? context.callerSessionId : process.env['CLAUDE_CODE_SESSION_ID'];
+  if (!sessionId) return;
+  const current = `${lock.tier}:${lock.companySlug ?? ''}`;
+  const previous = lockBySession.get(sessionId);
+  if (previous === current) return;
+  if (lockBySession.size >= SEEN_CAP) lockBySession.clear();
+  lockBySession.set(sessionId, current);
+  appendSessionLog({
+    event: 'tier-change',
+    claudeSessionId: sessionId,
+    tier: lock.tier,
+    companySlug: lock.companySlug,
+    lockedCompanySlug: lock.companySlug,
+    previous: previous ?? null,
+  });
+}
+
+/** Never throws: an audit write failure must not block the call it records. */
+function appendSessionLog(fields: Record<string, unknown>): void {
   try {
     const logDir = path.join(supernalHome(), 'board-sessions');
     fs.mkdirSync(logDir, { recursive: true });
-    const entry = {
-      timestamp: new Date().toISOString(),
-      event: 'company-touch',
-      claudeSessionId: claudeSessionId ?? null,
-      tier: lock.tier,
-      companySlug: companySlug ?? null,
-      lockedCompanySlug: lock.companySlug,
-      allowed: decision.allowed,
-      reason: decision.reason,
-    };
+    const entry = { timestamp: new Date().toISOString(), ...fields };
     fs.appendFileSync(path.join(logDir, 'session-log.ndjson'), `${JSON.stringify(entry)}\n`, {
       encoding: 'utf8',
       mode: 0o600,

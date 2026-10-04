@@ -88,10 +88,15 @@ function stalenessNotice(config: MCPServerConfig): string | undefined {
 export interface MCPCallContext {
   transport?: 'stdio' | 'http';
   callerSessionId?: string;
+  callerCompanySlug?: string;
+  callerUserAgent?: string;
 }
 
 /** Header carrying the caller's Claude Code session id on the HTTP transport. */
 export const CLAUDE_SESSION_HEADER = 'x-claude-session-id';
+
+/** Header carrying a company lock the caller's own env asserts (SUPERNAL_COMPANY_SLUG). */
+export const SUPERNAL_COMPANY_HEADER = 'x-supernal-company-slug';
 
 export async function createMCPServer(
   registry: CommandRegistry,
@@ -363,7 +368,20 @@ export async function createMCPHttpApp(
       typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSession)
         ? rawSession
         : undefined;
-    const server = await createMCPServer(registry, config, { transport: 'http', callerSessionId });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const headers = (req as any).headers ?? {};
+    const rawCompany = headers[SUPERNAL_COMPANY_HEADER];
+    // Passed through unvalidated: a malformed company header still means "lock me", so the
+    // tenancy resolver refuses it instead of treating it as absent.
+    const callerCompanySlug = typeof rawCompany === 'string' ? rawCompany.slice(0, 200) : undefined;
+    const rawAgent = headers['user-agent'];
+    const callerUserAgent = typeof rawAgent === 'string' ? rawAgent.slice(0, 200) : undefined;
+    const server = await createMCPServer(registry, config, {
+      transport: 'http',
+      callerSessionId,
+      callerCompanySlug,
+      callerUserAgent,
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).on('close', () => transport.close());
     await server.connect(transport);

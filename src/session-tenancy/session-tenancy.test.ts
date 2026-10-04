@@ -11,8 +11,10 @@ import {
   currentCompanyLock,
   isAgentContext,
   isAgentProcess,
+  resetSessionLogDedupe,
   resolveContextCompanyLock,
   sessionExecutionScope,
+  setUnidentifiedCallerPolicy,
 } from './index';
 
 const ENV_KEYS = ['SUPERNAL_HOME', 'SUPERNAL_COMPANY_SLUG', 'CLAUDE_CODE_SESSION_ID'] as const;
@@ -67,12 +69,14 @@ async function callTool(
   url: string,
   name: string,
   args: Record<string, unknown>,
-  sessionId?: string
+  sessionId?: string,
+  extraHeaders: Record<string, string> = {}
 ): Promise<{ isError?: boolean; text: string }> {
   const headers: Record<string, string> = {
     authorization: 'Bearer t',
     'content-type': 'application/json',
     accept: 'application/json, text/event-stream',
+    ...extraHeaders,
   };
   if (sessionId !== undefined) headers['x-claude-session-id'] = sessionId;
   const res = await fetch(`${url}/mcp`, {
@@ -100,7 +104,19 @@ beforeEach(() => {
   }
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tenancy-'));
   process.env['SUPERNAL_HOME'] = home;
+  resetSessionLogDedupe();
+  setUnidentifiedCallerPolicy('refuse');
 });
+
+function readLog(): Array<Record<string, unknown>> {
+  const file = path.join(home, 'board-sessions', 'session-log.ndjson');
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
+}
 
 afterEach(() => {
   for (const k of ENV_KEYS) {
@@ -178,6 +194,87 @@ describe('session tenancy over the MCP HTTP transport', () => {
   it('lets an operator session (no sidecar) act on any company', async () => {
     const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, 'sess-operator');
     expect(JSON.parse(res.text)).toEqual({ company: 'b' });
+  });
+
+  it("'platform' policy: an unidentified caller keeps today's behavior and is logged, without content", async () => {
+    setUnidentifiedCallerPolicy('platform');
+    const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, undefined, {
+      'user-agent': 'claude-code/test',
+    });
+    expect(JSON.parse(res.text)).toEqual({ company: 'b' });
+    expect(JSON.parse((await callTool(url, 'sc_lock_probe', {})).text)).toEqual({
+      tier: 'platform',
+      companySlug: null,
+      unidentified: true,
+    });
+    const entries = readLog().filter((e) => e['event'] === 'unidentified-caller');
+    expect(entries[0]).toMatchObject({
+      tier: 'unidentified',
+      policy: 'platform',
+      allowed: true,
+      tool: 'sc_scoped_write',
+      userAgent: 'claude-code/test',
+    });
+    expect(JSON.stringify(entries)).not.toContain('"b"');
+  });
+
+  it("'refuse' policy: an unidentified caller is refused and logged", async () => {
+    setUnidentifiedCallerPolicy('refuse');
+    const res = await callTool(url, 'sc_scoped_write', { company: 'a' });
+    expect(res.isError).toBe(true);
+    expect(
+      readLog().some((e) => e['event'] === 'unidentified-caller' && e['policy'] === 'refuse')
+    ).toBe(true);
+  });
+
+  it('rate-limits unidentified-caller log lines per caller', async () => {
+    setUnidentifiedCallerPolicy('platform');
+    for (let i = 0; i < 3; i++)
+      await callTool(url, 'sc_lock_probe', {}, undefined, { 'user-agent': 'ua-1' });
+    expect(readLog().filter((e) => e['event'] === 'unidentified-caller')).toHaveLength(1);
+  });
+
+  it('X-Supernal-Company-Slug locks a caller with no session id', async () => {
+    setUnidentifiedCallerPolicy('platform');
+    const hdr = { 'x-supernal-company-slug': 'a' };
+    expect(JSON.parse((await callTool(url, 'sc_lock_probe', {}, undefined, hdr)).text)).toEqual({
+      tier: 'locked',
+      companySlug: 'a',
+    });
+    const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, undefined, hdr);
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("locked to company 'a'");
+  });
+
+  it('X-Supernal-Company-Slug never unlocks: it locks an operator session too', async () => {
+    const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, 'sess-operator', {
+      'x-supernal-company-slug': 'a',
+    });
+    expect(res.isError).toBe(true);
+  });
+
+  it('a malformed company header is refused even under the platform policy', async () => {
+    setUnidentifiedCallerPolicy('platform');
+    const res = await callTool(url, 'sc_scoped_write', { company: 'a' }, 'sess-operator', {
+      'x-supernal-company-slug': '../a',
+    });
+    expect(res.isError).toBe(true);
+  });
+
+  it('logs denials every time but an allowed touch only once per session/company', async () => {
+    writeSidecar('sess-a', { tier: 'board', companySlug: 'a' });
+    for (let i = 0; i < 3; i++) await callTool(url, 'sc_scoped_write', { company: 'a' }, 'sess-a');
+    for (let i = 0; i < 2; i++) await callTool(url, 'sc_scoped_write', { company: 'b' }, 'sess-a');
+    const touches = readLog().filter((e) => e['event'] === 'company-touch');
+    expect(touches.filter((e) => e['allowed'] === true)).toHaveLength(1);
+    expect(touches.filter((e) => e['allowed'] === false)).toHaveLength(2);
+    const changes = readLog().filter((e) => e['event'] === 'tier-change');
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({
+      claudeSessionId: 'sess-a',
+      tier: 'locked',
+      companySlug: 'a',
+    });
   });
 });
 

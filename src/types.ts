@@ -81,6 +81,18 @@ export interface ExecutionContext {
    */
   callerSessionId?: string;
 
+  /**
+   * MCP HTTP only: company from the `X-Supernal-Company-Slug` header. The tenancy resolver
+   * treats it as a lock, never as a way to lift one.
+   */
+  callerCompanySlug?: string;
+
+  /** MCP HTTP only: the caller's User-Agent, for audit logs. */
+  callerUserAgent?: string;
+
+  /** MCP only: the tool name this call was made under. */
+  mcpToolName?: string;
+
   /** Additional context data */
   [key: string]: any;
 }
@@ -481,6 +493,10 @@ export interface MCPCallExtra {
   transport?: 'stdio' | 'http';
   /** Caller-asserted Claude Code session id (copied to ExecutionContext.callerSessionId). */
   callerSessionId?: string;
+  /** Caller-asserted company lock (copied to ExecutionContext.callerCompanySlug). */
+  callerCompanySlug?: string;
+  /** Caller User-Agent (copied to ExecutionContext.callerUserAgent). */
+  callerUserAgent?: string;
 }
 
 /**
