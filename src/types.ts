@@ -70,6 +70,17 @@ export interface ExecutionContext {
    */
   session?: SessionStore;
 
+  /** MCP surface only: which transport delivered the call. Unset for stdio and non-MCP callers. */
+  transport?: 'stdio' | 'http';
+
+  /**
+   * The Claude Code session id the CALLER asserts, read from the
+   * `X-Claude-Session-Id` request header on the MCP HTTP transport. Distinct
+   * from `sessionId` (the MCP transport's own id). It identifies, it does not
+   * authenticate: the Bearer token is the authentication.
+   */
+  callerSessionId?: string;
+
   /** Additional context data */
   [key: string]: any;
 }
@@ -466,6 +477,10 @@ export interface MCPCallExtra {
   }) => Promise<void>;
   /** Metadata from the original `tools/call` request (e.g. `progressToken`). */
   meta?: { progressToken?: string | number; [key: string]: unknown };
+  /** Transport that delivered the call (copied to ExecutionContext.transport). */
+  transport?: 'stdio' | 'http';
+  /** Caller-asserted Claude Code session id (copied to ExecutionContext.callerSessionId). */
+  callerSessionId?: string;
 }
 
 /**

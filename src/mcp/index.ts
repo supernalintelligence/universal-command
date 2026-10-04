@@ -80,7 +80,24 @@ function stalenessNotice(config: MCPServerConfig): string | undefined {
  *   staleness: { latestVersion: '1.3.0', updateHint: 'Run: sc mcp update my-server' },
  * });
  */
-export async function createMCPServer(registry: CommandRegistry, config: MCPServerConfig) {
+/**
+ * Request-scoped identity merged into every tool call's MCPCallExtra. The HTTP
+ * app builds one server per request and passes the caller's transport and
+ * asserted Claude session id through here.
+ */
+export interface MCPCallContext {
+  transport?: 'stdio' | 'http';
+  callerSessionId?: string;
+}
+
+/** Header carrying the caller's Claude Code session id on the HTTP transport. */
+export const CLAUDE_SESSION_HEADER = 'x-claude-session-id';
+
+export async function createMCPServer(
+  registry: CommandRegistry,
+  config: MCPServerConfig,
+  callContext?: MCPCallContext
+) {
   const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
   const { ListToolsRequestSchema, CallToolRequestSchema } =
     await import('@modelcontextprotocol/sdk/types.js');
@@ -132,7 +149,9 @@ export async function createMCPServer(registry: CommandRegistry, config: MCPServ
       // (the previous behavior here) double-JSON-encodes every tool result.
       // The mapped `extra` carries sessionId + real progress-notification
       // plumbing through to toMCP()'s execute() (see toMCPCallExtra above).
-      return await command.toMCP().execute(args ?? {}, toMCPCallExtra(extra));
+      return await command
+        .toMCP()
+        .execute(args ?? {}, { ...toMCPCallExtra(extra), ...callContext });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -335,7 +354,16 @@ export async function createMCPHttpApp(
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
     });
-    const server = await createMCPServer(registry, config);
+    // The caller's Claude session id travels in a header, never in tool args, so a
+    // model cannot pick a different session per call. An absent or malformed value
+    // is passed as undefined; the host's tenancy policy decides what that means.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawSession = (req as any).headers?.[CLAUDE_SESSION_HEADER];
+    const callerSessionId =
+      typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSession)
+        ? rawSession
+        : undefined;
+    const server = await createMCPServer(registry, config, { transport: 'http', callerSessionId });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).on('close', () => transport.close());
     await server.connect(transport);

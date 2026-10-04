@@ -16,7 +16,7 @@ Core abstraction for the Supernal platform. Define a command once and auto-gener
 ## Build & Test
 
 ```bash
-pnpm run build       # tsup (builds 7 entry points: index, codegen, generators, mcp, testing, runtime, scopes)
+pnpm run build       # tsup (builds 8 entry points: index, codegen, generators, mcp, testing, runtime, scopes, session-tenancy)
 pnpm test            # vitest (watch mode)
 pnpm run test:ci     # vitest run
 pnpm run type-check  # tsc --noEmit
@@ -46,6 +46,8 @@ src/
     index.ts            # Runtime utilities
   scopes/
     index.ts            # Semantic scope system for command grouping and progressive loading
+  session-tenancy/
+    index.ts            # Node-only session-to-company lock resolver, tenancy guard, execution scope
   commands/             # Built-in commands (planning, workflow, agent, test)
 ```
 

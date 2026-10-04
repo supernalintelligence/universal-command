@@ -13,6 +13,7 @@ export default defineConfig({
     'testing/index': 'src/testing/index.ts',
     'runtime/index': 'src/runtime/index.ts',
     'scopes/index': 'src/scopes/index.ts',
+    'session-tenancy/index': 'src/session-tenancy/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,

@@ -33,6 +33,12 @@ export interface TenancyDecision {
   allowed: boolean;
   /** Human-readable reason, required when allowed is false. */
   reason?: string;
+  /**
+   * Company to use when the caller omitted the company argument. execute()
+   * writes it into the command's `tenancy.companyParam` before the handler
+   * runs, so a company-locked session never falls through to a no-company path.
+   */
+  resolvedCompany?: string;
 }
 
 export type TenancyGuardFn = (
@@ -50,6 +56,21 @@ export function setTenancyGuard(fn: TenancyGuardFn | null): void {
 /** Test/inspection helper — not part of the public contract other hosts should rely on. */
 export function getTenancyGuard(): TenancyGuardFn | null {
   return tenancyGuard;
+}
+
+/**
+ * Process-wide wrapper around every execute() (guard + handler). A host uses
+ * it to bind request-scoped state, e.g. the caller's company lock in an
+ * AsyncLocalStorage, so code with no ExecutionContext (a storage factory) can
+ * still see who the request is for. Unset means execute() runs unwrapped.
+ */
+export type ExecutionScopeFn = <T>(context: ExecutionContext, run: () => Promise<T>) => Promise<T>;
+
+let executionScope: ExecutionScopeFn | null = null;
+
+/** Register the process-wide execution scope. Call once per host process at startup. */
+export function setExecutionScope(fn: ExecutionScopeFn | null): void {
+  executionScope = fn;
 }
 
 // NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
@@ -97,19 +118,28 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     // malformed request should fail as a validation error, not a tenancy
     // error) and BEFORE the handler — the handler never runs for a rejected
     // request.
-    if (this.schema.tenancy?.companyParam && tenancyGuard) {
-      const requestedCompany = (validation.data as any)?.[this.schema.tenancy.companyParam];
-      const decision = await tenancyGuard(requestedCompany, context);
-      if (!decision.allowed) {
-        throw new AuthorizationError(
-          decision.reason ??
-            `Command '${this.schema.name}' refused: session is not authorized for company '${requestedCompany}'.`
-        );
+    const run = async (): Promise<TOutput> => {
+      if (this.schema.tenancy?.companyParam && tenancyGuard) {
+        const companyParam = this.schema.tenancy.companyParam;
+        const requestedCompany = (validation.data as any)?.[companyParam];
+        const decision = await tenancyGuard(requestedCompany, context);
+        if (!decision.allowed) {
+          throw new AuthorizationError(
+            decision.reason ??
+              `Command '${this.schema.name}' refused: session is not authorized for company '${requestedCompany}'.`
+          );
+        }
+        if (requestedCompany === undefined && decision.resolvedCompany) {
+          validation.data = {
+            ...((validation.data as object) ?? {}),
+            [companyParam]: decision.resolvedCompany,
+          } as TInput;
+        }
       }
-    }
+      return await this.schema.handler(validation.data as TInput, context);
+    };
 
-    // Execute handler
-    return await this.schema.handler(validation.data as TInput, context);
+    return executionScope ? await executionScope(context, run) : await run();
   }
 
   /**
@@ -856,6 +886,12 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           const context: ExecutionContext = { interface: 'mcp' };
           if (extra?.sessionId !== undefined) {
             context.sessionId = extra.sessionId;
+          }
+          if (extra?.transport !== undefined) {
+            context.transport = extra.transport;
+          }
+          if (extra?.callerSessionId !== undefined) {
+            context.callerSessionId = extra.callerSessionId;
           }
 
           // Real MCP progress notifications (fixes the prior silent-collapse bug).

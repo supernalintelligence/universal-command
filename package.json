@@ -61,6 +61,11 @@
       "types": "./dist/scopes/index.d.ts",
       "import": "./dist/scopes/index.js",
       "require": "./dist/scopes/index.cjs"
+    },
+    "./session-tenancy": {
+      "types": "./dist/session-tenancy/index.d.ts",
+      "import": "./dist/session-tenancy/index.js",
+      "require": "./dist/session-tenancy/index.cjs"
     }
   },
   "files": [
