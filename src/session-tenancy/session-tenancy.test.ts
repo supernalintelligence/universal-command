@@ -261,6 +261,43 @@ describe('session tenancy over the MCP HTTP transport', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('X-Supernal-Company-Slug naming another company than a sidecar lock is refused, not chosen', async () => {
+    setUnidentifiedCallerPolicy('platform');
+    writeSidecar('sess-a', { tier: 'board', companySlug: 'a' });
+    const hdr = { 'x-supernal-company-slug': 'b' };
+    for (const company of ['a', 'b']) {
+      const res = await callTool(url, 'sc_scoped_write', { company }, 'sess-a', hdr);
+      expect(res.isError, company).toBe(true);
+      expect(res.text).toContain("conflicts with this session's lock to company 'a'");
+    }
+    expect(
+      JSON.parse((await callTool(url, 'sc_lock_probe', {}, 'sess-a', hdr)).text)
+    ).toMatchObject({
+      tier: 'unidentified',
+      companySlug: null,
+    });
+    expect(readLog().some((e) => e['event'] === 'company-header-conflict')).toBe(true);
+  });
+
+  it('X-Supernal-Company-Slug naming another company than SUPERNAL_COMPANY_SLUG is refused', async () => {
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'a';
+    const res = await callTool(url, 'sc_scoped_write', { company: 'a' }, undefined, {
+      'x-supernal-company-slug': 'b',
+    });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("lock to company 'a'");
+  });
+
+  it('X-Supernal-Company-Slug equal to the existing lock is allowed', async () => {
+    writeSidecar('sess-a', { tier: 'board', companySlug: 'a' });
+    const hdr = { 'x-supernal-company-slug': 'a' };
+    const res = await callTool(url, 'sc_scoped_write', { company: 'a' }, 'sess-a', hdr);
+    expect(JSON.parse(res.text)).toEqual({ company: 'a' });
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'a';
+    const res2 = await callTool(url, 'sc_scoped_write', { company: 'a' }, undefined, hdr);
+    expect(JSON.parse(res2.text)).toEqual({ company: 'a' });
+  });
+
   it('logs denials every time but an allowed touch only once per session/company', async () => {
     writeSidecar('sess-a', { tier: 'board', companySlug: 'a' });
     for (let i = 0; i < 3; i++) await callTool(url, 'sc_scoped_write', { company: 'a' }, 'sess-a');

@@ -24,7 +24,9 @@
  *   - MCP over HTTP: ExecutionContext.callerSessionId from X-Claude-Session-Id. One
  *     daemon serves every session, so its own env says nothing about the caller. An
  *     X-Supernal-Company-Slug header (callerCompanySlug) locks the call to that company; it
- *     can only add a lock, never lift one. A request with neither header is unidentified:
+ *     can only add a lock to a platform/unlocked caller, never lift or change one. A header
+ *     naming a different company than an existing lock (sidecar or SUPERNAL_COMPANY_SLUG) is
+ *     refused outright. A request with neither header is unidentified:
  *     setUnidentifiedCallerPolicy('refuse') (the default) refuses it anything company-scoped,
  *     'platform' lets it through as platform tier and logs it (a log-only rollout).
  */
@@ -48,6 +50,8 @@ export interface CompanyLock {
   companySlug: string | null;
   /** Set when an unidentified HTTP caller was let through by the 'platform' policy. */
   unidentified?: true;
+  /** Set on an 'unidentified' lock refused for a reason other than a missing session header. */
+  refusal?: string;
 }
 
 /** What an HTTP caller with no session identity gets. */
@@ -135,23 +139,58 @@ export function resolveRequestCompanyLock(sessionId: string | undefined): Compan
   return resolveCompanyLockFor(sessionId, process.env['SUPERNAL_COMPANY_SLUG']);
 }
 
+let companyKeyNormalizer: (company: string) => string = (c) => c;
+
+/**
+ * Canonical company key used when an X-Supernal-Company-Slug header is compared with an
+ * existing lock, so a slug and its id match. createSessionTenancyGuard() installs its
+ * normalizeCompany here. A throw counts as a mismatch.
+ */
+export function setCompanyKeyNormalizer(fn: (company: string) => string): void {
+  companyKeyNormalizer = fn;
+}
+
+function sameCompany(a: string, b: string): boolean {
+  if (a === b) return true;
+  try {
+    return companyKeyNormalizer(a) === companyKeyNormalizer(b);
+  } catch {
+    return false;
+  }
+}
+
 /** Pick the identity source that matches how this call arrived (see the module comment). */
 export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): CompanyLock {
   if (context?.transport === 'http') {
-    const spawned = process.env['SUPERNAL_COMPANY_SLUG'];
-    if (spawned) return { tier: 'locked', companySlug: spawned };
     const headerCompany = context.callerCompanySlug;
     // A company header asks for a lock; a malformed one must not degrade to no lock.
     if (headerCompany !== undefined && !isValidCompanySlug(headerCompany)) {
       return { tier: 'unidentified', companySlug: null };
     }
-    if (!isValidSessionId(context.callerSessionId)) {
-      if (headerCompany) return { tier: 'locked', companySlug: headerCompany };
+    const spawned = process.env['SUPERNAL_COMPANY_SLUG'];
+    let base: CompanyLock | null = null;
+    if (spawned) base = { tier: 'locked', companySlug: spawned };
+    else if (isValidSessionId(context.callerSessionId)) {
+      base = resolveCompanyLockFor(context.callerSessionId, undefined);
+    }
+    if (!headerCompany) {
+      if (base) return base;
       return unidentifiedCallerPolicy === 'platform'
         ? { tier: 'platform', companySlug: null, unidentified: true }
         : { tier: 'unidentified', companySlug: null };
     }
-    return resolveCompanyLockFor(context.callerSessionId, headerCompany);
+    // The header may only add a lock to an unlocked caller, never change an existing one.
+    if (!base || base.tier !== 'locked' || !base.companySlug) {
+      return { tier: 'locked', companySlug: headerCompany };
+    }
+    if (sameCompany(base.companySlug, headerCompany)) return base;
+    return {
+      tier: 'unidentified',
+      companySlug: null,
+      refusal:
+        `Refused: X-Supernal-Company-Slug '${headerCompany}' conflicts with this session's ` +
+        `lock to company '${base.companySlug}'. The header can only add a lock, never change one.`,
+    };
   }
   if (context?.interface === 'api') return resolveRequestCompanyLock(context.sessionId);
   return resolveProcessCompanyLock();
@@ -214,6 +253,7 @@ export function createSessionTenancyGuard(
   options: SessionTenancyGuardOptions = {}
 ): TenancyGuardFn {
   const normalize = options.normalizeCompany ?? ((c: string) => c);
+  if (options.normalizeCompany) setCompanyKeyNormalizer(options.normalizeCompany);
 
   return (requestedCompanySlug, context) => {
     const lock = scopedCompanyLock() ?? resolveContextCompanyLock(context);
@@ -227,9 +267,10 @@ export function createSessionTenancyGuard(
       decision = {
         allowed: false,
         reason:
+          lock.refusal ??
           'Refused: this MCP HTTP request carried no X-Claude-Session-Id header (or a malformed ' +
-          'X-Supernal-Company-Slug), so the caller cannot be tied to a company. Configure the ' +
-          "client's headersHelper to send it.",
+            'X-Supernal-Company-Slug), so the caller cannot be tied to a company. Configure the ' +
+            "client's headersHelper to send it.",
       };
     } else if (!requestedCompanySlug) {
       decision =
@@ -296,6 +337,19 @@ export function resetSessionLogDedupe(): void {
 }
 
 function noteCallerLock(lock: CompanyLock, context: Partial<ExecutionContext> | undefined): void {
+  if (lock.refusal) {
+    appendSessionLog({
+      event: 'company-header-conflict',
+      claudeSessionId: context?.callerSessionId ?? null,
+      tier: lock.tier,
+      companySlug: context?.callerCompanySlug ?? null,
+      lockedCompanySlug: null,
+      allowed: false,
+      reason: lock.refusal,
+      tool: context?.mcpToolName ?? null,
+    });
+    return;
+  }
   if (lock.tier === 'unidentified' || lock.unidentified) {
     const caller = context?.callerUserAgent ?? 'unknown';
     const now = Date.now();
