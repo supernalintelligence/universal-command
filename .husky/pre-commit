@@ -1,5 +1,13 @@
 #!/bin/sh
 
+# >>> sc-never-commit-guard >>>
+# Managed by `sc git hooks install-guard`. Rules: sc's never-commit.defaults.yaml
+# plus this repo's supernal.yaml git_hooks.never_commit. Catches git add -f too.
+command -v sc >/dev/null 2>&1 || { echo "BLOCKED: sc is not on PATH, so the never-commit guard cannot run" >&2; exit 1; }
+sc git hooks run never-commit || exit 1
+# <<< sc-never-commit-guard <<<
+
+
 # Run lint-staged for formatting and linting
 npx lint-staged
 
