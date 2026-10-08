@@ -17,7 +17,12 @@ import {
   setUnidentifiedCallerPolicy,
 } from './index';
 
-const ENV_KEYS = ['SUPERNAL_HOME', 'SUPERNAL_COMPANY_SLUG', 'CLAUDE_CODE_SESSION_ID'] as const;
+const ENV_KEYS = [
+  'SUPERNAL_HOME',
+  'SUPERNAL_COMPANY_SLUG',
+  'CLAUDE_CODE_SESSION_ID',
+  'MODULE_COMPANY_ID',
+] as const;
 const saved: Record<string, string | undefined> = {};
 let home: string;
 
@@ -331,6 +336,41 @@ describe('resolveContextCompanyLock / agent checks', () => {
       tier: 'platform',
       companySlug: null,
     });
+  });
+
+  it('a lock carries the company id from MODULE_COMPANY_ID or the sidecar', () => {
+    const ID = '0a0a0a0a-0000-4000-8000-000000000001';
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'a';
+    process.env['MODULE_COMPANY_ID'] = ID;
+    expect(resolveContextCompanyLock({ interface: 'cli' })).toEqual({
+      tier: 'locked',
+      companySlug: 'a',
+      companyId: ID,
+    });
+    delete process.env['SUPERNAL_COMPANY_SLUG'];
+    expect(resolveContextCompanyLock({ interface: 'cli' })).toEqual({
+      tier: 'locked',
+      companySlug: null,
+      companyId: ID,
+    });
+    delete process.env['MODULE_COMPANY_ID'];
+    writeSidecar('sess-id', { tier: 'board', companySlug: 'a', companyId: ID });
+    process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-id';
+    expect(resolveContextCompanyLock({ interface: 'cli' })).toEqual({
+      tier: 'locked',
+      companySlug: 'a',
+      companyId: ID,
+    });
+  });
+
+  it('the guard compares ids: a lock labelled by slug accepts its own id and refuses another', () => {
+    const ID = '0a0a0a0a-0000-4000-8000-000000000001';
+    const OTHER = '0b0b0b0b-0000-4000-8000-000000000002';
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'si42';
+    process.env['MODULE_COMPANY_ID'] = ID;
+    const guard = createSessionTenancyGuard();
+    expect(guard(ID, { interface: 'cli' })).toMatchObject({ allowed: true });
+    expect(guard(OTHER, { interface: 'cli' })).toMatchObject({ allowed: false });
   });
 
   it('any Claude session process counts as an agent, sidecar or not', () => {

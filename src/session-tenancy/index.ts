@@ -47,7 +47,13 @@ export type CompanyLockTier = 'locked' | 'platform' | 'unidentified';
 
 export interface CompanyLock {
   tier: CompanyLockTier;
+  /** Display label (or, from a header, whatever the caller sent). */
   companySlug: string | null;
+  /**
+   * The locked company's id, when known: MODULE_COMPANY_ID for a spawn, the sidecar's
+   * companyId, or a header that is itself an id. Id-keyed consumers refuse a lock without it.
+   */
+  companyId?: string | null;
   /** Set when an unidentified HTTP caller was let through by the 'platform' policy. */
   unidentified?: true;
   /** Set on an 'unidentified' lock refused for a reason other than a missing session header. */
@@ -87,6 +93,23 @@ export function isValidCompanySlug(slug: unknown): slug is string {
 interface SessionMapEntry {
   tier?: string;
   companySlug?: string | null;
+  companyId?: string | null;
+}
+
+const COMPANY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function asCompanyId(value: unknown): string | null {
+  return typeof value === 'string' && COMPANY_ID_PATTERN.test(value) ? value : null;
+}
+
+/** `{ companyId }` when `id` is set, else nothing (a lock without a known id omits the field). */
+function idField(id: string | null): { companyId?: string } {
+  return id ? { companyId: id } : {};
+}
+
+/** MODULE_COMPANY_ID: the id a spawner (CronScheduler, a Codex PTY) locked this process to. */
+function envCompanyId(): string | null {
+  return asCompanyId(process.env['MODULE_COMPANY_ID']);
 }
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -117,13 +140,21 @@ export function resolveCompanyLockFor(
   sessionId: string | undefined,
   spawnedCompanySlug: string | undefined
 ): CompanyLock {
-  if (spawnedCompanySlug) return { tier: 'locked', companySlug: spawnedCompanySlug };
+  if (spawnedCompanySlug) {
+    return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(envCompanyId()) };
+  }
+  const spawnedId = envCompanyId();
+  if (spawnedId) return { tier: 'locked', companySlug: null, companyId: spawnedId };
   if (!sessionId) return { tier: 'platform', companySlug: null };
   const entry = readSessionMapEntry(sessionId);
   if (!entry || entry.tier === 'platform' || !entry.companySlug) {
     return { tier: 'platform', companySlug: null };
   }
-  return { tier: 'locked', companySlug: entry.companySlug };
+  return {
+    tier: 'locked',
+    companySlug: entry.companySlug,
+    ...idField(asCompanyId(entry.companyId)),
+  };
 }
 
 /** CLI / stdio MCP: one process is one session for its whole life. */
@@ -169,7 +200,9 @@ export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): 
     }
     const spawned = process.env['SUPERNAL_COMPANY_SLUG'];
     let base: CompanyLock | null = null;
-    if (spawned) base = { tier: 'locked', companySlug: spawned };
+    if (spawned) base = { tier: 'locked', companySlug: spawned, ...idField(envCompanyId()) };
+    else if (envCompanyId())
+      base = { tier: 'locked', companySlug: null, companyId: envCompanyId() };
     else if (isValidSessionId(context.callerSessionId)) {
       base = resolveCompanyLockFor(context.callerSessionId, undefined);
     }
@@ -180,16 +213,17 @@ export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): 
         : { tier: 'unidentified', companySlug: null };
     }
     // The header may only add a lock to an unlocked caller, never change an existing one.
-    if (!base || base.tier !== 'locked' || !base.companySlug) {
-      return { tier: 'locked', companySlug: headerCompany };
+    if (!base || base.tier !== 'locked' || (!base.companySlug && !base.companyId)) {
+      return { tier: 'locked', companySlug: headerCompany, ...idField(asCompanyId(headerCompany)) };
     }
-    if (sameCompany(base.companySlug, headerCompany)) return base;
+    if (base.companyId && base.companyId === asCompanyId(headerCompany)) return base;
+    if (base.companySlug && sameCompany(base.companySlug, headerCompany)) return base;
     return {
       tier: 'unidentified',
       companySlug: null,
       refusal:
         `Refused: X-Supernal-Company-Slug '${headerCompany}' conflicts with this session's ` +
-        `lock to company '${base.companySlug}'. The header can only add a lock, never change one.`,
+        `lock to company '${base.companySlug ?? base.companyId}'. The header can only add a lock, never change one.`,
     };
   }
   if (context?.interface === 'api') return resolveRequestCompanyLock(context.sessionId);
@@ -274,23 +308,28 @@ export function createSessionTenancyGuard(
       };
     } else if (!requestedCompanySlug) {
       decision =
-        lock.tier === 'locked' && lock.companySlug
-          ? { allowed: true, resolvedCompany: lock.companySlug }
+        lock.tier === 'locked' && (lock.companySlug || lock.companyId)
+          ? { allowed: true, resolvedCompany: (lock.companySlug ?? lock.companyId) as string }
           : { allowed: true };
     } else if (lock.tier === 'platform') {
       decision = { allowed: true };
     } else {
       let same = false;
-      try {
-        same = normalize(lock.companySlug as string) === normalize(requestedCompanySlug);
-      } catch {
-        same = false;
+      const requestedId = asCompanyId(requestedCompanySlug);
+      if (lock.companyId && requestedId) {
+        same = lock.companyId === requestedId;
+      } else if (lock.companySlug) {
+        try {
+          same = normalize(lock.companySlug) === normalize(requestedCompanySlug);
+        } catch {
+          same = false;
+        }
       }
       decision = same
         ? { allowed: true }
         : {
             allowed: false,
-            reason: `Session is locked to company '${lock.companySlug}' and may not act on company '${requestedCompanySlug}'.`,
+            reason: `Session is locked to company '${lock.companySlug ?? lock.companyId}' and may not act on company '${requestedCompanySlug}'.`,
           };
     }
 
