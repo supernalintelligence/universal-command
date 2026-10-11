@@ -487,12 +487,23 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       // fix (confirmed: state.universal.ts's `paths` param had the same
       // latent bug). Commander's documented "collect" pattern accumulates
       // each occurrence into an array instead of overwriting.
+      // object-type params arrive from the CLI as a JSON string; parse it so validation sees an object.
       const parseArg =
         param.type === 'number'
           ? (v: string) => Number(v)
           : param.type === 'array'
             ? (v: string, previous: string[] = []) => previous.concat([v])
-            : undefined;
+            : param.type === 'object'
+              ? (v: string) => {
+                  try {
+                    return JSON.parse(v);
+                  } catch {
+                    throw new (nodeRequire('commander').InvalidArgumentError)(
+                      `--${param.name} must be a JSON object`
+                    );
+                  }
+                }
+              : undefined;
 
       if (param.required && !isBoolean) {
         cmd.requiredOption(flags, param.description, parseArg);

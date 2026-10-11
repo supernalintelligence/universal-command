@@ -207,6 +207,28 @@ describe('P0-2: Positional Arguments', () => {
     expect(received).toEqual(['a', 'b']);
   });
 
+  it('should parse an object-type OPTION from its JSON string', async () => {
+    let received: unknown;
+    const command = new UniversalCommand({
+      name: 'thing send',
+      description: 'Send a thing',
+      input: {
+        parameters: [{ name: 'primary', type: 'object', description: 'Action', required: true }],
+      },
+      output: { type: 'text' },
+      handler: async (args) => {
+        received = args.primary;
+        return 'ok';
+      },
+    });
+    await command
+      .toCLI()
+      .parseAsync(['node', 'thing-send', '--primary', '{"id":"open","label":"Open"}'], {
+        from: 'node',
+      });
+    expect(received).toEqual({ id: 'open', label: 'Open' });
+  });
+
   it('should mix positional and option parameters', () => {
     const command = new UniversalCommand({
       name: 'copy',
