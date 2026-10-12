@@ -49,6 +49,8 @@ export interface MCPServerConfig {
   capabilities?: Record<string, unknown>;
   /** When latestVersion !== version, nudges the calling agent to update (see StalenessInfo). */
   staleness?: StalenessInfo;
+  /** Server instructions shown to the calling model, joined with any staleness notice. */
+  instructions?: string;
 }
 
 function stalenessNotice(config: MCPServerConfig): string | undefined {
@@ -108,12 +110,13 @@ export async function createMCPServer(
     await import('@modelcontextprotocol/sdk/types.js');
 
   const notice = stalenessNotice(config);
+  const instructions = [config.instructions, notice].filter(Boolean).join('\n\n');
 
   const server = new Server(
     { name: config.name, version: config.version },
     {
       capabilities: { tools: {}, ...config.capabilities },
-      ...(notice ? { instructions: notice } : {}),
+      ...(instructions ? { instructions } : {}),
     }
   );
 

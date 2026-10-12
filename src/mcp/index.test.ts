@@ -919,3 +919,28 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
     }
   });
 });
+
+describe('createMCPServer — instructions option', () => {
+  it('joins config.instructions with the staleness notice and passes capabilities through', async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const server = await createMCPServer(buildRegistry(), {
+      name: 'test',
+      version: '1.0.0',
+      instructions: 'Messages arrive as <channel> turns.',
+      staleness: { latestVersion: '1.2.0' },
+      capabilities: { experimental: { 'claude/channel': {} } },
+    });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'c', version: '0' });
+    await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
+    const instructions = client.getInstructions() ?? '';
+    expect(instructions.startsWith('Messages arrive as <channel> turns.')).toBe(true);
+    expect(instructions).toContain('1.2.0');
+    expect(client.getServerCapabilities()).toMatchObject({
+      tools: {},
+      experimental: { 'claude/channel': {} },
+    });
+    await client.close();
+  });
+});
