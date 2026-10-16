@@ -19,6 +19,7 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     setupFiles,
+    globalSetup: ['./vitest.global-setup.ts'],
     coverage: {
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.ts'],
