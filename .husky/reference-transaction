@@ -44,6 +44,14 @@ _resolve_dev_branch() {
     fi
     d=$(dirname "$d")
   done
+  # No configured dev_branch found — consult the durable personal identity
+  # file (~/.supernal/dev-branch, written by config-loader.ts's getDevBranch()
+  # auto-bootstrap or `sc dev-branch set`) before the hardcoded literal below.
+  # See .supernal/docs/specs/platform/2026-09-02-file-based-dev-branch-identity-implementation.md.
+  if [ -f "$HOME/.supernal/dev-branch" ]; then
+    _pdb=$(tr -d '[:space:]' < "$HOME/.supernal/dev-branch" 2>/dev/null)
+    [ -n "$_pdb" ] && { printf '%s' "$_pdb"; return 0; }
+  fi
   printf 'ian-dev'
 }
 
