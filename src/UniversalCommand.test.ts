@@ -654,73 +654,74 @@ describe('UniversalCommand', () => {
     });
   });
 
-  describe('toNextAPI — next/server dynamic import', () => {
-    const makeCmd = (handler: () => Promise<unknown>) =>
-      new UniversalCommand({
-        name: 'api-next-import',
-        description: 'Test next/server loading',
-        input: { parameters: [] },
-        output: { type: 'json' },
-        api: { method: 'GET' },
-        handler: handler as any,
-      });
+  describe('toNextAPI — next/server loading', () => {
     const fakeRequest = {
       method: 'GET',
       headers: { get: () => null },
       nextUrl: { searchParams: new URLSearchParams() },
     };
 
+    // Re-import UniversalCommand with ./nextResponse mocked so the handler sees a chosen loader result.
+    async function routeWith(loaded: unknown, handler: () => Promise<unknown>) {
+      vi.resetModules();
+      vi.doMock('./nextResponse', () => ({ loadNextResponse: async () => loaded }));
+      const { UniversalCommand: UC } = await import('./UniversalCommand');
+      return new UC({
+        name: 'api-next-import',
+        description: 'Test next/server loading',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: handler as any,
+      }).toNextAPI().GET!;
+    }
+
     afterEach(() => {
-      vi.doUnmock('next/server');
+      vi.doUnmock('./nextResponse');
+      vi.resetModules();
     });
 
-    it('uses NextResponse.json from a mocked next/server on success', async () => {
-      const json = vi.fn((body: unknown, init?: { status?: number }) => ({
-        mocked: true,
-        body,
-        status: init?.status ?? 200,
-        headers: new Headers(),
-      }));
-      vi.doMock('next/server', () => ({ NextResponse: { json } }));
-      const res: any = await makeCmd(async () => ({ ok: 1 })).toNextAPI().GET!(fakeRequest as any);
+    it('uses NextResponse.json on success when next/server loads', async () => {
+      const json = vi.fn(() => ({ mocked: true }));
+      const get = await routeWith({ json }, async () => ({ ok: 1 }));
+      const res: any = await get(fakeRequest as any);
       expect(res.mocked).toBe(true);
       expect(json).toHaveBeenCalledWith({ ok: 1 });
     });
 
-    it('uses NextResponse.json from a mocked next/server on error', async () => {
+    it('uses NextResponse.json with details and status on error when next/server loads', async () => {
       const json = vi.fn((body: unknown, init?: { status?: number }) => ({
-        mocked: true,
         body,
-        status: init?.status ?? 200,
+        status: init?.status,
       }));
-      vi.doMock('next/server', () => ({ NextResponse: { json } }));
-      const res: any = await makeCmd(async () => {
-        throw new Error('boom');
-      }).toNextAPI().GET!(fakeRequest as any);
-      expect(res.mocked).toBe(true);
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('boom');
+      const get = await routeWith({ json }, async () => {
+        throw Object.assign(new Error('boom'), { details: { status: 418, why: 'tea' } });
+      });
+      const res: any = await get(fakeRequest as any);
+      expect(res.status).toBe(418);
+      expect(res.body).toEqual({ error: 'boom', details: { status: 418, why: 'tea' } });
     });
 
-    it('falls back to a standard Response with status 200 when next/server is unavailable', async () => {
-      vi.doMock('next/server', () => {
-        throw new Error('Cannot find module next/server');
-      });
-      const res = await makeCmd(async () => ({ ok: 1 })).toNextAPI().GET!(fakeRequest as any);
+    it('returns a plain 200 JSON Response (not a NextResponse) when next/server is unavailable', async () => {
+      const { NextResponse } = await import('next/server');
+      const get = await routeWith(undefined, async () => ({ ok: 1 }));
+      const res = await get(fakeRequest as any);
+      expect(res).toBeInstanceOf(Response);
+      expect(res).not.toBeInstanceOf(NextResponse);
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/json');
       expect(await res.json()).toEqual({ ok: 1 });
     });
 
-    it('falls back to a standard error Response when next/server is unavailable', async () => {
-      vi.doMock('next/server', () => {
-        throw new Error('Cannot find module next/server');
+    it('returns a plain error Response including details when next/server is unavailable', async () => {
+      const { NextResponse } = await import('next/server');
+      const get = await routeWith(undefined, async () => {
+        throw Object.assign(new Error('boom'), { details: { status: 418, why: 'tea' } });
       });
-      const res = await makeCmd(async () => {
-        throw new Error('boom');
-      }).toNextAPI().GET!(fakeRequest as any);
-      expect(res.status).toBe(500);
-      expect((await res.json()).error).toBe('boom');
+      const res = await get(fakeRequest as any);
+      expect(res).not.toBeInstanceOf(NextResponse);
+      expect(res.status).toBe(418);
+      expect(await res.json()).toEqual({ error: 'boom', details: { status: 418, why: 'tea' } });
     });
   });
 

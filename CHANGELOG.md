@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `toNextAPI()` no longer returns HTTP 500 for every successful response when the package is loaded as ESM. `next/server` is now resolved at request time without a bare `require()`.
+- Behavior change: when `next` cannot be loaded, a successful `toNextAPI()` call now returns a plain `Response` with status 200 and the JSON body instead of the old 500 "next package is required" error. The error-path fallback body now includes `details`.
+
 ## [0.1.0] - 2025-01-31
 
 ### Added

@@ -16,6 +16,7 @@ import type {
 } from './types';
 import { AuthorizationError, ValidationError } from './errors';
 import { nodeRequire } from './nodeRequire';
+import { loadNextResponse } from './nextResponse';
 
 /**
  * Session-to-company tenancy guard (REQ-STC-101/102). A host process (the
@@ -77,20 +78,9 @@ export function setExecutionScope(fn: ExecutionScopeFn | null): void {
 // tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
 // which is Node-only and breaks the browser/client bundle the moment a client
 // component pulls in the dashboard SDK barrel (which value-imports these classes).
-// The bare `require(...)` calls below are rewritten by esbuild to its built-in,
-// browser-safe `__require` shim (guards on `typeof require`), so they only run
-// server-side (CLI/API) and never emit a static `import 'module'`. This is the
-// proven fix for the recurring "Can't resolve 'module'" regression. See CLAUDE.md.
-
-/** Runtime-resolved NextResponse; undefined when next/server is not importable. */
-async function loadNextResponse(): Promise<any | undefined> {
-  try {
-    const mod: any = await import('next/server');
-    return mod.NextResponse ?? mod.default?.NextResponse;
-  } catch {
-    return undefined;
-  }
-}
+// Lazy Node-only loading goes through `nodeRequire` (./nodeRequire.ts), which never emits
+// a static `import 'module'` and is invisible to bundlers. No bare `require(...)` calls
+// remain here: esbuild's ESM output turns them into a throwing `__require` shim.
 
 export class UniversalCommand<TInput = any, TOutput = any> {
   constructor(public readonly schema: CommandSchema<TInput, TOutput>) {
@@ -729,6 +719,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     const method = this.schema.api?.method || 'GET';
 
     const handler = async (request: any, context?: any) => {
+      const NextResponse = await loadNextResponse();
       try {
         // Extract arguments from request
         const args = await this.extractAPIArgs(request, context);
@@ -778,9 +769,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Execute command
         const result = await this.execute(args, execContext);
 
-        // Create response. next/server is loaded with a runtime dynamic import:
-        // a bare require() throws in the ESM build, which turned every success into a 500.
-        const NextResponse = await loadNextResponse();
+        // Create response (plain Response when next/server is unavailable)
         const response = NextResponse
           ? NextResponse.json(result)
           : new Response(JSON.stringify(result), {
@@ -806,9 +795,8 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
         return response;
       } catch (error: any) {
-        const NextResponse = await loadNextResponse();
         if (!NextResponse) {
-          return new Response(JSON.stringify({ error: error.message }), {
+          return new Response(JSON.stringify({ error: error.message, details: error.details }), {
             status: error.details?.status || 500,
             headers: { 'Content-Type': 'application/json' },
           });
