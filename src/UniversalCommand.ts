@@ -82,6 +82,16 @@ export function setExecutionScope(fn: ExecutionScopeFn | null): void {
 // server-side (CLI/API) and never emit a static `import 'module'`. This is the
 // proven fix for the recurring "Can't resolve 'module'" regression. See CLAUDE.md.
 
+/** Runtime-resolved NextResponse; undefined when next/server is not importable. */
+async function loadNextResponse(): Promise<any | undefined> {
+  try {
+    const mod: any = await import('next/server');
+    return mod.NextResponse ?? mod.default?.NextResponse;
+  } catch {
+    return undefined;
+  }
+}
+
 export class UniversalCommand<TInput = any, TOutput = any> {
   constructor(public readonly schema: CommandSchema<TInput, TOutput>) {
     this.validateSchema();
@@ -768,18 +778,15 @@ export class UniversalCommand<TInput = any, TOutput = any> {
         // Execute command
         const result = await this.execute(args, execContext);
 
-        // Create response
-        let NextResponse: any;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          NextResponse = require('next/server').NextResponse;
-        } catch {
-          throw new Error(
-            'next package is required for API generation. Install with: npm install next'
-          );
-        }
-
-        const response = NextResponse.json(result);
+        // Create response. next/server is loaded with a runtime dynamic import:
+        // a bare require() throws in the ESM build, which turned every success into a 500.
+        const NextResponse = await loadNextResponse();
+        const response = NextResponse
+          ? NextResponse.json(result)
+          : new Response(JSON.stringify(result), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
 
         // Apply cache control if specified
         if (this.schema.api?.cacheControl) {
@@ -799,12 +806,8 @@ export class UniversalCommand<TInput = any, TOutput = any> {
 
         return response;
       } catch (error: any) {
-        let NextResponse: any;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          NextResponse = require('next/server').NextResponse;
-        } catch {
-          // Fallback to basic Response
+        const NextResponse = await loadNextResponse();
+        if (!NextResponse) {
           return new Response(JSON.stringify({ error: error.message }), {
             status: error.details?.status || 500,
             headers: { 'Content-Type': 'application/json' },

@@ -654,6 +654,76 @@ describe('UniversalCommand', () => {
     });
   });
 
+  describe('toNextAPI — next/server dynamic import', () => {
+    const makeCmd = (handler: () => Promise<unknown>) =>
+      new UniversalCommand({
+        name: 'api-next-import',
+        description: 'Test next/server loading',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: handler as any,
+      });
+    const fakeRequest = {
+      method: 'GET',
+      headers: { get: () => null },
+      nextUrl: { searchParams: new URLSearchParams() },
+    };
+
+    afterEach(() => {
+      vi.doUnmock('next/server');
+    });
+
+    it('uses NextResponse.json from a mocked next/server on success', async () => {
+      const json = vi.fn((body: unknown, init?: { status?: number }) => ({
+        mocked: true,
+        body,
+        status: init?.status ?? 200,
+        headers: new Headers(),
+      }));
+      vi.doMock('next/server', () => ({ NextResponse: { json } }));
+      const res: any = await makeCmd(async () => ({ ok: 1 })).toNextAPI().GET!(fakeRequest as any);
+      expect(res.mocked).toBe(true);
+      expect(json).toHaveBeenCalledWith({ ok: 1 });
+    });
+
+    it('uses NextResponse.json from a mocked next/server on error', async () => {
+      const json = vi.fn((body: unknown, init?: { status?: number }) => ({
+        mocked: true,
+        body,
+        status: init?.status ?? 200,
+      }));
+      vi.doMock('next/server', () => ({ NextResponse: { json } }));
+      const res: any = await makeCmd(async () => {
+        throw new Error('boom');
+      }).toNextAPI().GET!(fakeRequest as any);
+      expect(res.mocked).toBe(true);
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('boom');
+    });
+
+    it('falls back to a standard Response with status 200 when next/server is unavailable', async () => {
+      vi.doMock('next/server', () => {
+        throw new Error('Cannot find module next/server');
+      });
+      const res = await makeCmd(async () => ({ ok: 1 })).toNextAPI().GET!(fakeRequest as any);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/json');
+      expect(await res.json()).toEqual({ ok: 1 });
+    });
+
+    it('falls back to a standard error Response when next/server is unavailable', async () => {
+      vi.doMock('next/server', () => {
+        throw new Error('Cannot find module next/server');
+      });
+      const res = await makeCmd(async () => {
+        throw new Error('boom');
+      }).toNextAPI().GET!(fakeRequest as any);
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe('boom');
+    });
+  });
+
   describe('toNextAPI — companyAuth (opt-in, injectable authCheck)', () => {
     function fakePostRequest(body: unknown) {
       return {
