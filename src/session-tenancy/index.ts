@@ -13,9 +13,10 @@
  *   setExecutionScope(sessionExecutionScope);
  *
  * Resolution (resolveCompanyLockFor):
- *   1. SUPERNAL_COMPANY_SLUG: an automated spawn, always locked to that company.
- *   2. <SUPERNAL_HOME>/board-sessions/session-map/<sessionId>.json, the sidecar the
- *      SessionStart hook writes for a board/department/director session.
+ *   1. With a session id, <home>/.supernal/board-sessions/session-map/<sessionId>.json (the record the
+ *      SessionStart hook writes) decides. SUPERNAL_COMPANY_SLUG and MODULE_COMPANY_ID can only agree with
+ *      it (a mismatch is refused) or narrow a platform record. A missing record is unidentified.
+ *   2. With no session id, SUPERNAL_COMPANY_SLUG / MODULE_COMPANY_ID (an automated spawn) lock the process.
  *   3. Neither: platform tier (unrestricted).
  *
  * Which session id applies depends on the caller (resolveContextCompanyLock):
@@ -33,9 +34,14 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ExecutionContext } from '../types';
+import {
+  harnessSessionId,
+  processStartedByAgent,
+  readTrustedSessionRecord,
+  trustedSupernalHome,
+} from './trust';
 import type { TenancyDecision, TenancyGuardFn, ExecutionScopeFn } from '../UniversalCommand';
 
 /**
@@ -119,50 +125,78 @@ export function isValidSessionId(sessionId: unknown): sessionId is string {
   return typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId);
 }
 
-function supernalHome(): string {
-  return process.env['SUPERNAL_HOME'] ?? path.join(os.homedir(), '.supernal'); // allow-hardpath: the SessionStart hook writes its sidecar under this root
-}
-
 function readSessionMapEntry(sessionId: string): SessionMapEntry | null {
   if (!isValidSessionId(sessionId)) return null;
-  try {
-    const raw = fs.readFileSync(
-      path.join(supernalHome(), 'board-sessions', 'session-map', `${sessionId}.json`),
-      'utf8'
-    );
-    return JSON.parse(raw) as SessionMapEntry;
-  } catch {
-    return null;
-  }
+  return readTrustedSessionRecord<SessionMapEntry>(sessionId);
 }
 
 export function resolveCompanyLockFor(
   sessionId: string | undefined,
   spawnedCompanySlug: string | undefined
 ): CompanyLock {
-  if (spawnedCompanySlug) {
-    return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(envCompanyId()) };
-  }
   const spawnedId = envCompanyId();
-  if (spawnedId) return { tier: 'locked', companySlug: null, companyId: spawnedId };
-  if (!sessionId) return { tier: 'platform', companySlug: null };
-  const entry = readSessionMapEntry(sessionId);
-  if (!entry || entry.tier === 'platform' || !entry.companySlug) {
+  if (!sessionId) {
+    // No session id: a spawner (cron, a board PTY) locked this process through its environment.
+    if (spawnedCompanySlug)
+      return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(spawnedId) };
+    if (spawnedId) return { tier: 'locked', companySlug: null, companyId: spawnedId };
     return { tier: 'platform', companySlug: null };
   }
-  return {
-    tier: 'locked',
-    companySlug: entry.companySlug,
-    ...idField(asCompanyId(entry.companyId)),
-  };
+  // A session id: the record decides. The environment can only agree with it (or narrow a platform record),
+  // never override it. Same rule as supernal-code-package/src/cli/utils/session-tenancy-guard.ts.
+  const entry = readSessionMapEntry(sessionId);
+  if (!entry) {
+    return {
+      tier: 'unidentified',
+      companySlug: null,
+      refusal:
+        `Refused: session ${sessionId} has no trusted session record (missing, unreadable, not owned by this ` +
+        'user, or writable by others), so its company cannot be established.',
+    };
+  }
+  if (entry.tier === 'platform') {
+    if (spawnedCompanySlug)
+      return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(spawnedId) };
+    if (spawnedId) return { tier: 'locked', companySlug: null, companyId: spawnedId };
+    return { tier: 'platform', companySlug: null };
+  }
+  if (!entry.companySlug) {
+    return {
+      tier: 'unidentified',
+      companySlug: null,
+      refusal: 'Refused: the session record names no company.',
+    };
+  }
+  const entryId = asCompanyId(entry.companyId);
+  if (
+    (spawnedCompanySlug && spawnedCompanySlug !== entry.companySlug) ||
+    (spawnedId && entryId && spawnedId !== entryId)
+  ) {
+    return {
+      tier: 'unidentified',
+      companySlug: null,
+      refusal:
+        `Refused: the environment names company '${spawnedCompanySlug ?? spawnedId}' but the session record names ` +
+        `'${entry.companySlug}'; the environment cannot override the record.`,
+    };
+  }
+  return { tier: 'locked', companySlug: entry.companySlug, ...idField(entryId) };
 }
 
 /** CLI / stdio MCP: one process is one session for its whole life. */
 export function resolveProcessCompanyLock(): CompanyLock {
-  return resolveCompanyLockFor(
-    process.env['CLAUDE_CODE_SESSION_ID'],
-    process.env['SUPERNAL_COMPANY_SLUG']
-  );
+  const sessionId = harnessSessionId();
+  // An agent that removed its session id (env -u, env -i) still has an agent ancestor, and the company in
+  // its own environment is something it can set itself.
+  if (!sessionId && processStartedByAgent()) {
+    return {
+      tier: 'unidentified',
+      companySlug: null,
+      refusal:
+        'Refused: this process runs inside an agent session but carries no session id, so its company cannot be established.',
+    };
+  }
+  return resolveCompanyLockFor(sessionId, process.env['SUPERNAL_COMPANY_SLUG']);
 }
 
 /** Dashboard API: identity comes from the request, SUPERNAL_COMPANY_SLUG still applies process-wide. */
@@ -260,7 +294,9 @@ export const sessionExecutionScope: ExecutionScopeFn = (context, run) => {
  * (CLAUDE_CODE_SESSION_ID, sidecar or not). Only a bare human shell is false.
  */
 export function isAgentProcess(): boolean {
-  return Boolean(process.env['SUPERNAL_COMPANY_SLUG'] || process.env['CLAUDE_CODE_SESSION_ID']);
+  return Boolean(
+    process.env['SUPERNAL_COMPANY_SLUG'] || harnessSessionId() || processStartedByAgent()
+  );
 }
 
 /**
@@ -291,10 +327,7 @@ export function createSessionTenancyGuard(
 
   return (requestedCompanySlug, context) => {
     const lock = scopedCompanyLock() ?? resolveContextCompanyLock(context);
-    const sessionId =
-      context?.transport === 'http'
-        ? context.callerSessionId
-        : process.env['CLAUDE_CODE_SESSION_ID'];
+    const sessionId = context?.transport === 'http' ? context.callerSessionId : harnessSessionId();
 
     let decision: TenancyDecision;
     if (lock.tier === 'unidentified') {
@@ -419,8 +452,7 @@ function noteCallerLock(lock: CompanyLock, context: Partial<ExecutionContext> | 
     );
     return;
   }
-  const sessionId =
-    context?.transport === 'http' ? context.callerSessionId : process.env['CLAUDE_CODE_SESSION_ID'];
+  const sessionId = context?.transport === 'http' ? context.callerSessionId : harnessSessionId();
   if (!sessionId) return;
   const current = `${lock.tier}:${lock.companySlug ?? ''}`;
   const previous = lockBySession.get(sessionId);
@@ -440,7 +472,7 @@ function noteCallerLock(lock: CompanyLock, context: Partial<ExecutionContext> | 
 /** Never throws: an audit write failure must not block the call it records. */
 function appendSessionLog(fields: Record<string, unknown>): void {
   try {
-    const logDir = path.join(supernalHome(), 'board-sessions');
+    const logDir = path.join(trustedSupernalHome(), 'board-sessions');
     fs.mkdirSync(logDir, { recursive: true });
     const entry = { timestamp: new Date().toISOString(), ...fields };
     fs.appendFileSync(path.join(logDir, 'session-log.ndjson'), `${JSON.stringify(entry)}\n`, {

@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { __setAgentProbeForTest, __setTrustedHomeForTest } from './trust';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -12,6 +13,7 @@ import {
   isAgentContext,
   isAgentProcess,
   resetSessionLogDedupe,
+  resolveCompanyLockFor,
   resolveContextCompanyLock,
   sessionExecutionScope,
   setUnidentifiedCallerPolicy,
@@ -109,6 +111,8 @@ beforeEach(() => {
   }
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tenancy-'));
   process.env['SUPERNAL_HOME'] = home;
+  __setTrustedHomeForTest(home);
+  __setAgentProbeForTest(() => false);
   resetSessionLogDedupe();
   setUnidentifiedCallerPolicy('refuse');
 });
@@ -124,6 +128,8 @@ function readLog(): Array<Record<string, unknown>> {
 }
 
 afterEach(() => {
+  __setTrustedHomeForTest(undefined);
+  __setAgentProbeForTest(undefined);
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
@@ -196,8 +202,14 @@ describe('session tenancy over the MCP HTTP transport', () => {
     });
   });
 
-  it('lets an operator session (no sidecar) act on any company', async () => {
+  it('a session id with no trusted record is refused, not treated as an operator', async () => {
     const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, 'sess-operator');
+    expect(res.text).toMatch(/no trusted session record|Refused/);
+  });
+
+  it('a platform-tier record is the operator session', async () => {
+    writeSidecar('sess-platform', { tier: 'platform', companySlug: null });
+    const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, 'sess-platform');
     expect(JSON.parse(res.text)).toEqual({ company: 'b' });
   });
 
@@ -371,6 +383,41 @@ describe('resolveContextCompanyLock / agent checks', () => {
     const guard = createSessionTenancyGuard();
     expect(guard(ID, { interface: 'cli' })).toMatchObject({ allowed: true });
     expect(guard(OTHER, { interface: 'cli' })).toMatchObject({ allowed: false });
+  });
+
+  it('EXPLOIT SUPERNAL_COMPANY_SLUG / MODULE_COMPANY_ID cannot override the session record', () => {
+    const ID = '0a0a0a0a-0000-4000-8000-000000000001';
+    const OTHER = '0b0b0b0b-0000-4000-8000-000000000002';
+    writeSidecar('sess-rec', { tier: 'board', companySlug: 'a', companyId: ID });
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'victim';
+    expect(resolveCompanyLockFor('sess-rec', 'victim')).toMatchObject({ tier: 'unidentified' });
+    delete process.env['SUPERNAL_COMPANY_SLUG'];
+    process.env['MODULE_COMPANY_ID'] = OTHER;
+    expect(resolveCompanyLockFor('sess-rec', undefined)).toMatchObject({ tier: 'unidentified' });
+    process.env['MODULE_COMPANY_ID'] = ID;
+    expect(resolveCompanyLockFor('sess-rec', 'a')).toEqual({
+      tier: 'locked',
+      companySlug: 'a',
+      companyId: ID,
+    });
+    expect(resolveCompanyLockFor('sess-rec', undefined)).toEqual({
+      tier: 'locked',
+      companySlug: 'a',
+      companyId: ID,
+    });
+  });
+
+  it('a platform record can be narrowed by the environment, never widened; a missing record ignores the environment', () => {
+    writeSidecar('sess-plat', { tier: 'platform' });
+    expect(resolveCompanyLockFor('sess-plat', 'a')).toMatchObject({
+      tier: 'locked',
+      companySlug: 'a',
+    });
+    expect(resolveCompanyLockFor('sess-plat', undefined)).toEqual({
+      tier: 'platform',
+      companySlug: null,
+    });
+    expect(resolveCompanyLockFor('sess-none', 'a')).toMatchObject({ tier: 'unidentified' });
   });
 
   it('any Claude session process counts as an agent, sidecar or not', () => {

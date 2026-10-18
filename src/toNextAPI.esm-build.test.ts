@@ -46,7 +46,10 @@ function run(script: string, dir: string, ext: 'mjs' | 'cjs') {
   const body = ext === 'cjs' ? `(async () => {${script}})();` : script;
   const file = path.join(dir, `probe-${Math.random().toString(36).slice(2)}.${ext}`);
   fs.writeFileSync(file, body);
-  const stdout = execFileSync(process.execPath, [file], { cwd: pkgDir, encoding: 'utf8' });
+  // The pnpm bin shim that starts vitest exports NODE_PATH with the workspace's node_modules, which makes
+  // `next` resolvable from the isolated copy and turns the "no next" case into a NextResponse. Drop it.
+  const { NODE_PATH: _nodePath, ...env } = process.env;
+  const stdout = execFileSync(process.execPath, [file], { cwd: pkgDir, encoding: 'utf8', env });
   return JSON.parse(stdout.trim().split('\n').pop()!);
 }
 
