@@ -420,6 +420,117 @@ describe('resolveContextCompanyLock / agent checks', () => {
     expect(resolveCompanyLockFor('sess-none', 'a')).toMatchObject({ tier: 'unidentified' });
   });
 
+  it('EXPLOIT an unidentified record plus X-Supernal-Company-Slug does not get locked to the header company', () => {
+    writeSidecar('sess-u', { tier: 'board' }); // names no company
+    expect(
+      resolveContextCompanyLock({
+        transport: 'http',
+        callerSessionId: 'sess-u',
+        callerCompanySlug: 'victim',
+      })
+    ).toMatchObject({ tier: 'unidentified' });
+    expect(
+      resolveContextCompanyLock({
+        transport: 'http',
+        callerSessionId: 'sess-missing',
+        callerCompanySlug: 'victim',
+      })
+    ).toMatchObject({ tier: 'unidentified' });
+    writeSidecar('sess-ok', { tier: 'board', companySlug: 'a' });
+    expect(
+      resolveContextCompanyLock({
+        transport: 'http',
+        callerSessionId: 'sess-ok',
+        callerCompanySlug: 'a',
+      })
+    ).toMatchObject({ tier: 'locked', companySlug: 'a' });
+    writeSidecar('sess-plat2', { tier: 'platform' });
+    expect(
+      resolveContextCompanyLock({
+        transport: 'http',
+        callerSessionId: 'sess-plat2',
+        callerCompanySlug: 'a',
+      })
+    ).toMatchObject({ tier: 'locked', companySlug: 'a' });
+  });
+
+  // Shared test vectors: the same table is in supernal-code-package/src/cli/utils/__tests__/session-tenancy-guard-agent-context.test.ts.
+  // envIsTrusted is passed only by resolveRequestCompanyLock (the dashboard server's api interface).
+  it.each([
+    [
+      'trusted server env, missing record',
+      { sid: 'sess-none', env: 'acme', trusted: true },
+      { tier: 'locked', companySlug: 'acme' },
+    ],
+    [
+      'trusted server env, other company record',
+      { sid: 'sess-b', env: 'acme', trusted: true, record: { tier: 'board', companySlug: 'b' } },
+      { tier: 'locked', companySlug: 'acme' },
+    ],
+    [
+      'untrusted env, other company record',
+      { sid: 'sess-b', env: 'acme', trusted: false, record: { tier: 'board', companySlug: 'b' } },
+      { tier: 'unidentified' },
+    ],
+    [
+      'untrusted env, missing record',
+      { sid: 'sess-none', env: 'acme', trusted: false },
+      { tier: 'unidentified' },
+    ],
+    [
+      'no env, record decides',
+      { sid: 'sess-b', env: undefined, trusted: true, record: { tier: 'board', companySlug: 'b' } },
+      { tier: 'locked', companySlug: 'b' },
+    ],
+  ])('shared vector: %s', (_n, v, want) => {
+    if ((v as { record?: Record<string, unknown> }).record)
+      writeSidecar(v.sid, (v as { record: Record<string, unknown> }).record);
+    expect(resolveCompanyLockFor(v.sid, v.env, { envIsTrusted: v.trusted })).toMatchObject(want);
+  });
+
+  it('the api interface trusts the dashboard server env: acme with a missing record locks to acme', () => {
+    process.env['SUPERNAL_COMPANY_SLUG'] = 'acme';
+    expect(resolveContextCompanyLock({ interface: 'api', sessionId: 'sess-none' })).toMatchObject({
+      tier: 'locked',
+      companySlug: 'acme',
+    });
+  });
+
+  it('EXPLOIT-FALSE-POSITIVE a worker with an injected company under a claude ancestor keeps its lock; with no injected company it is refused', () => {
+    const markers = [
+      'CLAUDECODE',
+      'CLAUDE_CODE_ENTRYPOINT',
+      'CLAUDE_CODE_CHILD_SESSION',
+      'CODEX_THREAD_ID',
+      'CODEX_SESSION_ID',
+      'SC_AGENT_SESSION',
+    ];
+    const savedM = markers.map((k) => process.env[k]);
+    markers.forEach((k) => delete process.env[k]);
+    __setAgentProbeForTest(() => true);
+    try {
+      process.env['SUPERNAL_COMPANY_SLUG'] = 'acme';
+      expect(resolveContextCompanyLock({ interface: 'cli' })).toMatchObject({
+        tier: 'locked',
+        companySlug: 'acme',
+      });
+      delete process.env['SUPERNAL_COMPANY_SLUG'];
+      expect(resolveContextCompanyLock({ interface: 'cli' })).toMatchObject({
+        tier: 'unidentified',
+      });
+      process.env['SUPERNAL_COMPANY_SLUG'] = 'acme';
+      process.env['CLAUDECODE'] = '1'; // a marker means the injected env is not trusted
+      expect(resolveContextCompanyLock({ interface: 'cli' })).toMatchObject({
+        tier: 'unidentified',
+      });
+    } finally {
+      markers.forEach((k, i) => {
+        if (savedM[i] === undefined) delete process.env[k];
+        else process.env[k] = savedM[i];
+      });
+    }
+  });
+
   it('any Claude session process counts as an agent, sidecar or not', () => {
     expect(isAgentProcess()).toBe(false);
     process.env['CLAUDE_CODE_SESSION_ID'] = 'no-sidecar';

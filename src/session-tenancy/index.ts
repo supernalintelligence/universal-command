@@ -37,6 +37,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ExecutionContext } from '../types';
 import {
+  agentMarkerPresent,
   harnessSessionId,
   processStartedByAgent,
   readTrustedSessionRecord,
@@ -132,9 +133,17 @@ function readSessionMapEntry(sessionId: string): SessionMapEntry | null {
 
 export function resolveCompanyLockFor(
   sessionId: string | undefined,
-  spawnedCompanySlug: string | undefined
+  spawnedCompanySlug: string | undefined,
+  opts: { envIsTrusted?: boolean } = {}
 ): CompanyLock {
   const spawnedId = envCompanyId();
+  // envIsTrusted is passed only by resolveRequestCompanyLock, the dashboard server's api interface: the server's
+  // own SUPERNAL_COMPANY_SLUG is set by whoever starts the server, never by a caller of one request, so it is the
+  // lock (the single-company desktop build). Everywhere else the session record decides. Same rule and flag
+  // name as supernal-code-package/src/cli/utils/session-tenancy-guard.ts.
+  if (opts.envIsTrusted && spawnedCompanySlug) {
+    return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(spawnedId) };
+  }
   if (!sessionId) {
     // No session id: a spawner (cron, a board PTY) locked this process through its environment.
     if (spawnedCompanySlug)
@@ -188,7 +197,11 @@ export function resolveProcessCompanyLock(): CompanyLock {
   const sessionId = harnessSessionId();
   // An agent that removed its session id (env -u, env -i) still has an agent ancestor, and the company in
   // its own environment is something it can set itself.
-  if (!sessionId && processStartedByAgent()) {
+  // A spawner-injected company (cron, the worker) with no agent marker keeps its lock under a claude ancestor;
+  // ancestors only matter when no company was injected.
+  const injected =
+    Boolean(process.env['SUPERNAL_COMPANY_SLUG'] || envCompanyId()) && !agentMarkerPresent();
+  if (!sessionId && processStartedByAgent() && !injected) {
     return {
       tier: 'unidentified',
       companySlug: null,
@@ -201,7 +214,9 @@ export function resolveProcessCompanyLock(): CompanyLock {
 
 /** Dashboard API: identity comes from the request, SUPERNAL_COMPANY_SLUG still applies process-wide. */
 export function resolveRequestCompanyLock(sessionId: string | undefined): CompanyLock {
-  return resolveCompanyLockFor(sessionId, process.env['SUPERNAL_COMPANY_SLUG']);
+  return resolveCompanyLockFor(sessionId, process.env['SUPERNAL_COMPANY_SLUG'], {
+    envIsTrusted: true,
+  });
 }
 
 let companyKeyNormalizer: (company: string) => string = (c) => c;
@@ -246,6 +261,9 @@ export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): 
         ? { tier: 'platform', companySlug: null, unidentified: true }
         : { tier: 'unidentified', companySlug: null };
     }
+    // An unidentified caller (no record, no company) stays refused: the header can only AGREE with a record's
+    // company or narrow a platform record, never supply the company itself.
+    if (base && base.tier === 'unidentified') return base;
     // The header may only add a lock to an unlocked caller, never change an existing one.
     if (!base || base.tier !== 'locked' || (!base.companySlug && !base.companyId)) {
       return { tier: 'locked', companySlug: headerCompany, ...idField(asCompanyId(headerCompany)) };
