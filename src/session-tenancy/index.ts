@@ -43,6 +43,9 @@ import {
   readTrustedSessionRecord,
   trustedSupernalHome,
 } from './trust';
+
+/** Test hooks of the trust rules, re-exported for packages whose tests need a trusted session record. */
+export { __setAgentProbeForTest, __setTrustedHomeForTest } from './trust';
 import type { TenancyDecision, TenancyGuardFn, ExecutionScopeFn } from '../UniversalCommand';
 
 /**
@@ -61,6 +64,8 @@ export interface CompanyLock {
    * companyId, or a header that is itself an id. Id-keyed consumers refuse a lock without it.
    */
   companyId?: string | null;
+  /** The session record's repo path, set only from a trusted session record; the ancestor check requires it. */
+  companyCwd?: string;
   /** Set when an unidentified HTTP caller was let through by the 'platform' policy. */
   unidentified?: true;
   /** Set on an 'unidentified' lock refused for a reason other than a missing session header. */
@@ -101,6 +106,7 @@ interface SessionMapEntry {
   tier?: string;
   companySlug?: string | null;
   companyId?: string | null;
+  companyCwd?: string | null;
 }
 
 const COMPANY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -189,7 +195,11 @@ export function resolveCompanyLockFor(
         `'${entry.companySlug}'; the environment cannot override the record.`,
     };
   }
-  return { tier: 'locked', companySlug: entry.companySlug, ...idField(entryId) };
+  const cwd =
+    typeof entry.companyCwd === 'string' && entry.companyCwd
+      ? { companyCwd: entry.companyCwd }
+      : {};
+  return { tier: 'locked', companySlug: entry.companySlug, ...idField(entryId), ...cwd };
 }
 
 /** CLI / stdio MCP: one process is one session for its whole life. */
@@ -340,7 +350,7 @@ export interface SessionTenancyGuardOptions {
    * `reason` is the refusal text when it is not.
    */
   provenAncestor?: (
-    lockCompanyId: string,
+    lock: CompanyLock,
     requested: string
   ) => { allowed: true } | { allowed: false; reason: string };
 }
@@ -387,7 +397,7 @@ export function createSessionTenancyGuard(
       }
       const ancestor =
         !same && lock.companyId && options.provenAncestor
-          ? options.provenAncestor(lock.companyId, requestedCompanySlug)
+          ? options.provenAncestor(lock, requestedCompanySlug)
           : undefined;
       decision = same
         ? { allowed: true }

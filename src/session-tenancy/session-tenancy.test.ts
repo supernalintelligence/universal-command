@@ -391,8 +391,8 @@ describe('resolveContextCompanyLock / agent checks', () => {
     const SIBLING = '0c0c0c0c-0000-4000-8000-000000000003';
     process.env['MODULE_COMPANY_ID'] = CHILD;
     const seen: Array<[string, string]> = [];
-    const provenAncestor = (lockId: string, requested: string) => {
-      seen.push([lockId, requested]);
+    const provenAncestor = (lock: { companyId?: string | null }, requested: string) => {
+      seen.push([lock.companyId as string, requested]);
       return requested === PARENT
         ? ({ allowed: true } as const)
         : ({ allowed: false, reason: `not an ancestor: ${requested}` } as const);
