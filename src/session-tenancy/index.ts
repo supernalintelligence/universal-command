@@ -247,8 +247,21 @@ function sameCompany(a: string, b: string): boolean {
   }
 }
 
-/** Pick the identity source that matches how this call arrived (see the module comment). */
+/**
+ * Pick the identity source that matches how this call arrived (see the module comment). A call that
+ * arrived over HTTP, or through the dashboard API, names its session in the request, so the lock it
+ * gets never carries the session record's repo path: those callers get no ancestor grant.
+ */
 export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): CompanyLock {
+  const lock = resolveContextCompanyLockWithPath(context);
+  if (context?.transport === 'http' || context?.interface === 'api') {
+    const { companyCwd: _requestNamedPath, ...rest } = lock;
+    return rest;
+  }
+  return lock;
+}
+
+function resolveContextCompanyLockWithPath(context?: Partial<ExecutionContext>): CompanyLock {
   if (context?.transport === 'http') {
     const headerCompany = context.callerCompanySlug;
     // A company header asks for a lock; a malformed one must not degrade to no lock.
@@ -396,7 +409,11 @@ export function createSessionTenancyGuard(
         }
       }
       const ancestor =
-        !same && lock.companyId && lock.companyCwd && options.provenAncestor
+        !same &&
+        lock.companyId &&
+        lock.companyCwd &&
+        context?.transport !== 'http' &&
+        options.provenAncestor
           ? options.provenAncestor(lock, requestedCompanySlug)
           : undefined;
       decision = same

@@ -445,6 +445,24 @@ describe('resolveContextCompanyLock / agent checks', () => {
       expect(seen).toEqual([]);
     });
 
+    it("http transport: another session's valid id never gets that session's ancestor grant", () => {
+      writeSidecar('sess-victim', {
+        tier: 'board',
+        companySlug: 'child',
+        companyId: CHILD,
+        companyCwd: '/repo/child',
+      });
+      const guard = createSessionTenancyGuard({ provenAncestor });
+      const http = { interface: 'mcp', transport: 'http', callerSessionId: 'sess-victim' } as const;
+      expect(resolveContextCompanyLock(http)).toMatchObject({ tier: 'locked', companyId: CHILD });
+      expect(resolveContextCompanyLock(http).companyCwd).toBeUndefined();
+      expect(guard(PARENT, http)).toMatchObject({ allowed: false });
+      expect(seen).toEqual([]);
+      // The same record read by its own local process is the one place the grant applies.
+      process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-victim';
+      expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: true });
+    });
+
     it('a record with no repo path, an unknown session and a missing session never reach the option', () => {
       const guard = createSessionTenancyGuard({ provenAncestor });
       writeSidecar('sess-nocwd', { tier: 'board', companySlug: 'child', companyId: CHILD });
