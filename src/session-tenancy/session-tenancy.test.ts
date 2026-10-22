@@ -385,6 +385,36 @@ describe('resolveContextCompanyLock / agent checks', () => {
     expect(guard(OTHER, { interface: 'cli' })).toMatchObject({ allowed: false });
   });
 
+  it('lets a locked session act on a company the provenAncestor option accepts, and only then', () => {
+    const CHILD = '0a0a0a0a-0000-4000-8000-000000000001';
+    const PARENT = '0b0b0b0b-0000-4000-8000-000000000002';
+    const SIBLING = '0c0c0c0c-0000-4000-8000-000000000003';
+    process.env['MODULE_COMPANY_ID'] = CHILD;
+    const seen: Array<[string, string]> = [];
+    const provenAncestor = (lockId: string, requested: string) => {
+      seen.push([lockId, requested]);
+      return requested === PARENT
+        ? ({ allowed: true } as const)
+        : ({ allowed: false, reason: `not an ancestor: ${requested}` } as const);
+    };
+    const guard = createSessionTenancyGuard({ provenAncestor });
+    expect(guard(CHILD, { interface: 'cli' })).toMatchObject({ allowed: true });
+    expect(seen).toEqual([]);
+    expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: true });
+    expect(guard(SIBLING, { interface: 'cli' })).toEqual({
+      allowed: false,
+      reason: `not an ancestor: ${SIBLING}`,
+    });
+    expect(seen).toEqual([
+      [CHILD, PARENT],
+      [CHILD, SIBLING],
+    ]);
+    // Without the option no ancestor is ever allowed.
+    expect(createSessionTenancyGuard()(PARENT, { interface: 'cli' })).toMatchObject({
+      allowed: false,
+    });
+  });
+
   it('EXPLOIT SUPERNAL_COMPANY_SLUG / MODULE_COMPANY_ID cannot override the session record', () => {
     const ID = '0a0a0a0a-0000-4000-8000-000000000001';
     const OTHER = '0b0b0b0b-0000-4000-8000-000000000002';

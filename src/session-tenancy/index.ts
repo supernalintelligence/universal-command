@@ -334,6 +334,15 @@ export interface SessionTenancyGuardOptions {
    * a slug and its id match. Throwing means "unresolvable" and the call is refused.
    */
   normalizeCompany?: (company: string) => string;
+  /**
+   * Decide whether `requested` is a proven ancestor of the locked company, so a session locked
+   * to a child may act on a parent that vouches for it. Absent: no ancestor is ever allowed.
+   * `reason` is the refusal text when it is not.
+   */
+  provenAncestor?: (
+    lockCompanyId: string,
+    requested: string
+  ) => { allowed: true } | { allowed: false; reason: string };
 }
 
 /** Build the TenancyGuardFn to pass to setTenancyGuard(). */
@@ -376,12 +385,21 @@ export function createSessionTenancyGuard(
           same = false;
         }
       }
+      const ancestor =
+        !same && lock.companyId && options.provenAncestor
+          ? options.provenAncestor(lock.companyId, requestedCompanySlug)
+          : undefined;
       decision = same
         ? { allowed: true }
-        : {
-            allowed: false,
-            reason: `Session is locked to company '${lock.companySlug ?? lock.companyId}' and may not act on company '${requestedCompanySlug}'.`,
-          };
+        : ancestor?.allowed
+          ? { allowed: true }
+          : {
+              allowed: false,
+              reason:
+                ancestor && !ancestor.allowed
+                  ? ancestor.reason
+                  : `Session is locked to company '${lock.companySlug ?? lock.companyId}' and may not act on company '${requestedCompanySlug}'.`,
+            };
     }
 
     const touched = requestedCompanySlug ?? decision.resolvedCompany;
