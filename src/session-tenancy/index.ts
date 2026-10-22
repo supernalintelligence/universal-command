@@ -43,7 +43,6 @@ import {
   readTrustedSessionRecord,
   trustedSupernalHome,
 } from './trust';
-
 import type { TenancyDecision, TenancyGuardFn, ExecutionScopeFn } from '../UniversalCommand';
 
 /**
@@ -62,8 +61,6 @@ export interface CompanyLock {
    * companyId, or a header that is itself an id. Id-keyed consumers refuse a lock without it.
    */
   companyId?: string | null;
-  /** The session record's repo path, set only from a trusted session record; the ancestor check requires it. */
-  companyCwd?: string;
   /** Set when an unidentified HTTP caller was let through by the 'platform' policy. */
   unidentified?: true;
   /** Set on an 'unidentified' lock refused for a reason other than a missing session header. */
@@ -104,7 +101,6 @@ interface SessionMapEntry {
   tier?: string;
   companySlug?: string | null;
   companyId?: string | null;
-  companyCwd?: string | null;
 }
 
 const COMPANY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -193,11 +189,7 @@ export function resolveCompanyLockFor(
         `'${entry.companySlug}'; the environment cannot override the record.`,
     };
   }
-  const cwd =
-    typeof entry.companyCwd === 'string' && entry.companyCwd
-      ? { companyCwd: entry.companyCwd }
-      : {};
-  return { tier: 'locked', companySlug: entry.companySlug, ...idField(entryId), ...cwd };
+  return { tier: 'locked', companySlug: entry.companySlug, ...idField(entryId) };
 }
 
 /** CLI / stdio MCP: one process is one session for its whole life. */
@@ -247,21 +239,8 @@ function sameCompany(a: string, b: string): boolean {
   }
 }
 
-/**
- * Pick the identity source that matches how this call arrived (see the module comment). A call that
- * arrived over HTTP, or through the dashboard API, names its session in the request, so the lock it
- * gets never carries the session record's repo path: those callers get no ancestor grant.
- */
+/** Pick the identity source that matches how this call arrived (see the module comment). */
 export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): CompanyLock {
-  const lock = resolveContextCompanyLockWithPath(context);
-  if (context?.transport === 'http' || context?.interface === 'api') {
-    const { companyCwd: _requestNamedPath, ...rest } = lock;
-    return rest;
-  }
-  return lock;
-}
-
-function resolveContextCompanyLockWithPath(context?: Partial<ExecutionContext>): CompanyLock {
   if (context?.transport === 'http') {
     const headerCompany = context.callerCompanySlug;
     // A company header asks for a lock; a malformed one must not degrade to no lock.
@@ -355,17 +334,6 @@ export interface SessionTenancyGuardOptions {
    * a slug and its id match. Throwing means "unresolvable" and the call is refused.
    */
   normalizeCompany?: (company: string) => string;
-  /**
-   * Decide whether `requested` is a proven ancestor of the locked company, so a session locked
-   * to a child may act on a parent that vouches for it. Consulted only for a lock read from a
-   * trusted local session record (it carries the record's repo path); a lock from the environment or
-   * a request header never reaches it. Absent: no ancestor is ever allowed.
-   * `reason` is the refusal text when it is not.
-   */
-  provenAncestor?: (
-    lock: CompanyLock,
-    requested: string
-  ) => { allowed: true } | { allowed: false; reason: string };
 }
 
 /** Build the TenancyGuardFn to pass to setTenancyGuard(). */
@@ -408,25 +376,12 @@ export function createSessionTenancyGuard(
           same = false;
         }
       }
-      const ancestor =
-        !same &&
-        lock.companyId &&
-        lock.companyCwd &&
-        context?.transport !== 'http' &&
-        options.provenAncestor
-          ? options.provenAncestor(lock, requestedCompanySlug)
-          : undefined;
       decision = same
         ? { allowed: true }
-        : ancestor?.allowed
-          ? { allowed: true }
-          : {
-              allowed: false,
-              reason:
-                ancestor && !ancestor.allowed
-                  ? ancestor.reason
-                  : `Session is locked to company '${lock.companySlug ?? lock.companyId}' and may not act on company '${requestedCompanySlug}'.`,
-            };
+        : {
+            allowed: false,
+            reason: `Session is locked to company '${lock.companySlug ?? lock.companyId}' and may not act on company '${requestedCompanySlug}'.`,
+          };
     }
 
     const touched = requestedCompanySlug ?? decision.resolvedCompany;
