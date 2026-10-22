@@ -385,11 +385,10 @@ describe('resolveContextCompanyLock / agent checks', () => {
     expect(guard(OTHER, { interface: 'cli' })).toMatchObject({ allowed: false });
   });
 
-  it('lets a locked session act on a company the provenAncestor option accepts, and only then', () => {
+  describe('provenAncestor option: only a lock read from a trusted local session record reaches it', () => {
     const CHILD = '0a0a0a0a-0000-4000-8000-000000000001';
     const PARENT = '0b0b0b0b-0000-4000-8000-000000000002';
     const SIBLING = '0c0c0c0c-0000-4000-8000-000000000003';
-    process.env['MODULE_COMPANY_ID'] = CHILD;
     const seen: Array<[string, string]> = [];
     const provenAncestor = (lock: { companyId?: string | null }, requested: string) => {
       seen.push([lock.companyId as string, requested]);
@@ -397,21 +396,67 @@ describe('resolveContextCompanyLock / agent checks', () => {
         ? ({ allowed: true } as const)
         : ({ allowed: false, reason: `not an ancestor: ${requested}` } as const);
     };
-    const guard = createSessionTenancyGuard({ provenAncestor });
-    expect(guard(CHILD, { interface: 'cli' })).toMatchObject({ allowed: true });
-    expect(seen).toEqual([]);
-    expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: true });
-    expect(guard(SIBLING, { interface: 'cli' })).toEqual({
-      allowed: false,
-      reason: `not an ancestor: ${SIBLING}`,
+    beforeEach(() => {
+      seen.length = 0;
     });
-    expect(seen).toEqual([
-      [CHILD, PARENT],
-      [CHILD, SIBLING],
-    ]);
-    // Without the option no ancestor is ever allowed.
-    expect(createSessionTenancyGuard()(PARENT, { interface: 'cli' })).toMatchObject({
-      allowed: false,
+
+    it('a record with a repo path: the option decides', () => {
+      writeSidecar('sess-anc', {
+        tier: 'board',
+        companySlug: 'child',
+        companyId: CHILD,
+        companyCwd: '/repo/child',
+      });
+      process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-anc';
+      const guard = createSessionTenancyGuard({ provenAncestor });
+      expect(guard(CHILD, { interface: 'cli' })).toMatchObject({ allowed: true });
+      expect(seen).toEqual([]);
+      expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: true });
+      expect(guard(SIBLING, { interface: 'cli' })).toEqual({
+        allowed: false,
+        reason: `not an ancestor: ${SIBLING}`,
+      });
+      expect(seen).toEqual([
+        [CHILD, PARENT],
+        [CHILD, SIBLING],
+      ]);
+    });
+
+    it('without the option no ancestor is ever allowed', () => {
+      writeSidecar('sess-anc', {
+        tier: 'board',
+        companySlug: 'child',
+        companyId: CHILD,
+        companyCwd: '/repo/child',
+      });
+      process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-anc';
+      expect(createSessionTenancyGuard()(PARENT, { interface: 'cli' })).toMatchObject({
+        allowed: false,
+      });
+    });
+
+    it('an environment-injected lock (a spawner, or a hosted server with no local record) never reaches the option', () => {
+      process.env['MODULE_COMPANY_ID'] = CHILD;
+      const guard = createSessionTenancyGuard({ provenAncestor });
+      expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: false });
+      expect(guard(PARENT, { interface: 'mcp', transport: 'http' })).toMatchObject({
+        allowed: false,
+      });
+      expect(seen).toEqual([]);
+    });
+
+    it('a record with no repo path, an unknown session and a missing session never reach the option', () => {
+      const guard = createSessionTenancyGuard({ provenAncestor });
+      writeSidecar('sess-nocwd', { tier: 'board', companySlug: 'child', companyId: CHILD });
+      process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-nocwd';
+      expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: false });
+      process.env['CLAUDE_CODE_SESSION_ID'] = 'sess-unknown';
+      expect(guard(PARENT, { interface: 'cli' })).toMatchObject({ allowed: false });
+      delete process.env['CLAUDE_CODE_SESSION_ID'];
+      expect(guard(PARENT, { interface: 'mcp', transport: 'http' })).toMatchObject({
+        allowed: false,
+      });
+      expect(seen).toEqual([]);
     });
   });
 

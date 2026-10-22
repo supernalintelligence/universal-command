@@ -44,8 +44,6 @@ import {
   trustedSupernalHome,
 } from './trust';
 
-/** Test hooks of the trust rules, re-exported for packages whose tests need a trusted session record. */
-export { __setAgentProbeForTest, __setTrustedHomeForTest } from './trust';
 import type { TenancyDecision, TenancyGuardFn, ExecutionScopeFn } from '../UniversalCommand';
 
 /**
@@ -346,7 +344,9 @@ export interface SessionTenancyGuardOptions {
   normalizeCompany?: (company: string) => string;
   /**
    * Decide whether `requested` is a proven ancestor of the locked company, so a session locked
-   * to a child may act on a parent that vouches for it. Absent: no ancestor is ever allowed.
+   * to a child may act on a parent that vouches for it. Consulted only for a lock read from a
+   * trusted local session record (it carries the record's repo path); a lock from the environment or
+   * a request header never reaches it. Absent: no ancestor is ever allowed.
    * `reason` is the refusal text when it is not.
    */
   provenAncestor?: (
@@ -396,7 +396,7 @@ export function createSessionTenancyGuard(
         }
       }
       const ancestor =
-        !same && lock.companyId && options.provenAncestor
+        !same && lock.companyId && lock.companyCwd && options.provenAncestor
           ? options.provenAncestor(lock, requestedCompanySlug)
           : undefined;
       decision = same
