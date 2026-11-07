@@ -43,6 +43,7 @@ import {
   readTrustedSessionRecord,
   trustedSupernalHome,
 } from './trust';
+export { ancestorCompanyPin, harnessSessionId } from './trust';
 import type { TenancyDecision, TenancyGuardFn, ExecutionScopeFn } from '../UniversalCommand';
 
 /**

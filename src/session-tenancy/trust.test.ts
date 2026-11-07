@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -5,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   __setAgentProbeForTest,
   __setTrustedHomeForTest,
+  ancestorCompanyPin,
   harnessSessionId,
   readTrustedSessionRecord,
   trustedSupernalHome,
@@ -80,5 +82,74 @@ describe('trusted session records', () => {
     const long: Record<number, string> = {};
     for (let i = 2; i < 40; i++) long[i] = `${i + 1} zsh`;
     expect(walkLineage(2, ps(long))).toBe('unknown');
+  });
+});
+
+describe('ancestorCompanyPin', () => {
+  const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const START = 'Sat Nov 7 11:22:33 2026';
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uc-pin-'));
+    fs.chmodSync(dir, 0o700);
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const pin = (pid: number, rec: Record<string, unknown>, mode = 0o600) => {
+    const f = path.join(dir, `${pid}.json`);
+    fs.writeFileSync(f, JSON.stringify(rec), { mode });
+    fs.chmodSync(f, mode);
+  };
+  // caller 30 -> 20 (the PTY child) -> 10 -> 1
+  const chain = ps({ 30: `20 ${START}`, 20: `10 Sat Nov  7 11:22:33 2026`, 10: `1 ${START}` });
+
+  it('an owner-only record of an ancestor with the same start time names its company', () => {
+    pin(20, { pid: 20, companyId: A, startTime: START });
+    expect(ancestorCompanyPin(30, chain, dir)).toBe(A);
+  });
+
+  it('the real ps start time of the real parent process matches', () => {
+    const out = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.ppid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+    });
+    pin(process.ppid, {
+      pid: process.ppid,
+      companyId: A,
+      startTime: out.replace(/\s+/g, ' ').trim(),
+    });
+    expect(ancestorCompanyPin(process.ppid, undefined, dir)).toBe(A);
+  });
+
+  it('EXPLOIT no record is no pin', () => {
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+  });
+
+  it('EXPLOIT a record any other user can read or write (0644, 0666) is no pin', () => {
+    pin(20, { pid: 20, companyId: A, startTime: START }, 0o644);
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+    pin(20, { pid: 20, companyId: A, startTime: START }, 0o666);
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+  });
+
+  it('EXPLOIT a recycled pid (start time differs) is no pin', () => {
+    pin(20, { pid: 20, companyId: A, startTime: 'Fri Nov 6 09:00:00 2026' });
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+  });
+
+  it('EXPLOIT a record for a process that is not an ancestor is no pin', () => {
+    pin(99, { pid: 99, companyId: A, startTime: START });
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+  });
+
+  it('EXPLOIT a record naming another pid is no pin', () => {
+    pin(20, { pid: 21, companyId: A, startTime: START });
+    expect(ancestorCompanyPin(30, chain, dir)).toBeNull();
+  });
+
+  it('EXPLOIT a failed or empty ps is no pin', () => {
+    pin(20, { pid: 20, companyId: A, startTime: START });
+    expect(ancestorCompanyPin(30, ps({}), dir)).toBeNull();
+    expect(ancestorCompanyPin(30, ps({ 30: '' }), dir)).toBeNull();
+    expect(ancestorCompanyPin(30, ps({ 30: `20 ${START}` }), dir)).toBeNull();
   });
 });

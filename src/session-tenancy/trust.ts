@@ -6,6 +6,9 @@
  *  - A record counts only when it is a regular file (no symlink) owned by this user that no other user
  *    can write. Anything else is absent.
  *  - SUPERNAL_HOME in an agent's own environment is ignored and an empty value is rejected.
+ *  - A company pin counts only from an owner-only record in board-sessions/company-pins/<pid>.json, written by
+ *    the dashboard PTY server for that PTY's child, whose pid is an ancestor of this process and whose start
+ *    time matches that process's start time (so a recycled pid cannot match).
  *  - A claude/codex process among the ancestors marks an agent. An empty or failed `ps` and a chain longer
  *    than 24 levels are unknown, which counts as an agent only together with an environment marker.
  *
@@ -51,6 +54,8 @@ function psOut(args: string[]): string | null {
       encoding: 'utf8',
       timeout: 2000,
       stdio: ['ignore', 'pipe', 'ignore'],
+      // A fixed locale, so a start time reads the same here and in the dashboard's pin writer.
+      env: { ...process.env, LC_ALL: 'C' },
     }).trim();
   } catch {
     return null;
@@ -137,4 +142,42 @@ export function readTrustedSessionRecord<T = Record<string, unknown>>(sessionId:
   } catch {
     return null;
   }
+}
+
+/**
+ * The company named by a dashboard PTY pin record for an ancestor of this process, or null. Each ancestor's
+ * <home>/board-sessions/company-pins/<pid>.json counts only when it is mode 0600 or tighter, names that pid and records
+ * that process's own start time. A failed `ps` or a chain longer than 24 levels is null.
+ */
+export function ancestorCompanyPin(
+  startPid: number = process.ppid,
+  ps: (args: string[]) => string | null = psOut,
+  dir: string = path.join(trustedSupernalHome(), 'board-sessions', 'company-pins')
+): string | null {
+  if (process.platform === 'win32') return null;
+  let pid = startPid;
+  for (let depth = 0; depth < MAX_DEPTH && pid > 1; depth++) {
+    const out = ps(['-o', 'ppid=,lstart=', '-p', String(pid)]);
+    const m = out?.match(/^(\d+)\s+(.+)$/s);
+    if (!m) return null;
+    const file = path.join(dir, `${pid}.json`);
+    if (isOwnerOnlyRegularFile(file)) {
+      try {
+        if ((fs.lstatSync(file).mode & 0o077) !== 0) throw new Error('readable by others');
+        const rec = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+        const startedAt = (m[2] ?? '').replace(/\s+/g, ' ').trim();
+        if (
+          rec['pid'] === pid &&
+          rec['startTime'] === startedAt &&
+          typeof rec['companyId'] === 'string'
+        ) {
+          return rec['companyId'].toLowerCase();
+        }
+      } catch {
+        /* unreadable record: not a pin */
+      }
+    }
+    pid = Number(m[1]);
+  }
+  return null;
 }
