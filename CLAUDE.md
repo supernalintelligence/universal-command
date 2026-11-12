@@ -2,7 +2,7 @@
 
 > **Growth Gate:** Does this compound self-sustaining growth? If not, stop. See root CLAUDE.md.
 
-Core abstraction for the Supernal platform. Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.1.0, MIT, open source.
+Core abstraction for the Supernal platform. Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.2.0, MIT, open source.
 
 ## Tech Stack
 

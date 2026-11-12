@@ -195,6 +195,8 @@ server.setRequestHandler('tools/call', async (request) => {
 });
 ```
 
+`createMCPHttpApp` (from `@supernal/universal-command/mcp`) serves the registry over HTTP. Its default, `protocolEra: 'legacy'`, answers 2025-era clients in JSON. With `protocolEra: 'both'` it also serves the 2026-07-28 era, and it answers 2025-era clients with an event stream (`text/event-stream`) instead of JSON. A caller that reads only a JSON body, such as a bare `fetch(...).json()`, breaks when you switch modes; parse the `data:` lines or use an MCP client. In `'both'` mode, call the returned `close()` when you listen on `app` yourself.
+
 ---
 
 ## Interface-Specific Overrides

@@ -168,14 +168,13 @@ export class RuntimeServer {
     const useScopes = config.useScopes !== false && this.useScopes;
     const enableScopeLoading = config.enableScopeLoading !== false && useScopes;
 
-    // Lazy load the MCP SDK with require so the package works without it present
+    // Lazy load the MCP SDK with dynamic import (works in the CJS and the ESM build) so the package works without it present
     let Server: any;
     let StdioServerTransport: any;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      Server = require('@modelcontextprotocol/server').Server;
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      StdioServerTransport = require('@modelcontextprotocol/server/stdio').StdioServerTransport;
+      Server = (await import('@modelcontextprotocol/server')).Server;
+      StdioServerTransport = (await import('@modelcontextprotocol/server/stdio'))
+        .StdioServerTransport;
     } catch (e: any) {
       throw new Error(
         `@modelcontextprotocol/server package is required. Add it with your package manager. Error: ${e.message}`

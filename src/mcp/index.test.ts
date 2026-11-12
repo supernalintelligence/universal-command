@@ -879,6 +879,10 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
       const handlerFinished = new Promise<void>((resolve) => {
         handlerDone = resolve;
       });
+      let handlerStarted: () => void = () => {};
+      const handlerRunning = new Promise<void>((resolve) => {
+        handlerStarted = resolve;
+      });
       registry.register(
         new UniversalCommand({
           name: 'stream crash test',
@@ -886,9 +890,10 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
           input: { parameters: [] },
           output: { type: 'stream' },
           handler: async (_args, context) => {
-            // Give the test time to close the client transport before this
-            // write fires, so its sendNotification call has a real transport
-            // to fail against.
+            // Signal that the call is in flight, then give the test time to close
+            // the client transport before this write fires, so its sendNotification
+            // call has a real transport to fail against.
+            handlerStarted();
             await new Promise((r) => setTimeout(r, 20));
             context.stream!.write('this write races a closed transport');
             handlerDone();
@@ -913,7 +918,7 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
         )
         .catch((err: unknown) => err); // either outcome is fine, we're testing for no crash
 
-      await new Promise((r) => setTimeout(r, 5));
+      await handlerRunning;
       await client.close();
       await handlerFinished;
       await callPromise;

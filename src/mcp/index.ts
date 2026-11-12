@@ -124,8 +124,9 @@ export function callContextFromHeaders(read: (name: string) => string | undefine
 }
 
 /**
- * Same as callContextFromHeaders for a 2026-07-28 request. Fails closed: a request that
- * carries no headers cannot be identified, so it is refused instead of served as anonymous.
+ * Same as callContextFromHeaders for a request handed to the 'both' factory. A defensive check:
+ * the SDK always passes a real Request, so a request with no headers cannot occur through
+ * toNodeHandler; if it ever did, it is refused instead of served as anonymous.
  */
 export function callContextFromRequestInfo(requestInfo?: {
   headers?: { get(name: string): string | null };
@@ -278,7 +279,12 @@ export async function createMCPHttpApp(
      */
     protocolEra?: 'legacy' | 'both';
   }
-): Promise<{ app: unknown; start: (port?: number) => Promise<void> }> {
+): Promise<{
+  app: unknown;
+  start: (port?: number) => Promise<void>;
+  /** Aborts open 2026-07-28 exchanges. `start()` calls it when its server closes; call it yourself if you listen on `app` directly. */
+  close: () => Promise<void>;
+}> {
   const { timingSafeEqual, createHash } = await import('node:crypto');
   const express = await import('express').then((m) => m.default ?? m);
   const cors = await import('cors').then((m) => m.default ?? m);
@@ -395,6 +401,9 @@ export async function createMCPHttpApp(
     );
   }
 
+  // Tears down the 2026-07-28 leg ('both' mode only); the legacy leg holds nothing between requests.
+  let closeHandler: () => Promise<void> = async () => {};
+
   if (protocolEra === 'legacy') {
     // One transport and one server per request (stateless), answering 2025-era traffic in JSON.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -423,9 +432,13 @@ export async function createMCPHttpApp(
     // 2025-era requests are answered as an event stream, not JSON.
     const { createMcpHandler } = await import('@modelcontextprotocol/server');
     const { toNodeHandler } = await import('@modelcontextprotocol/node');
-    const mcpHandler = createMcpHandler((ctx) =>
-      createMCPServer(registry, config, callContextFromRequestInfo(ctx.requestInfo))
+    // This server publishes no change events, so subscriptions/listen is refused (maxSubscriptions 0)
+    // instead of letting any bearer-token holder open long-lived streams.
+    const mcpHandler = createMcpHandler(
+      (ctx) => createMCPServer(registry, config, callContextFromRequestInfo(ctx.requestInfo)),
+      { maxSubscriptions: 0 }
     );
+    closeHandler = () => mcpHandler.close();
     const nodeMcp = toNodeHandler(mcpHandler, {
       onerror: (e) =>
         console.error(`[mcp-http] ${config.name}@${config.version} handler error:`, e.message),
@@ -485,8 +498,11 @@ export async function createMCPHttpApp(
         resolve();
       });
       srv.on('error', reject);
+      srv.on('close', () => {
+        void closeHandler();
+      });
     });
   };
 
-  return { app: expressApp, start };
+  return { app: expressApp, start, close: () => closeHandler() };
 }
