@@ -6,26 +6,29 @@
  */
 
 import { CommandRegistry } from '../CommandRegistry.js';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 import type { MCPCallExtra } from '../types.js';
 
 /**
- * Maps a real @modelcontextprotocol/sdk `RequestHandlerExtra` (kept loosely
+ * Maps a real @modelcontextprotocol/server handler context (`ctx`, kept loosely
  * typed here — the SDK is a lazy-loaded, optional peer dependency; this
  * module dynamic-imports it, never a static import) into the SDK-agnostic
  * `MCPCallExtra` shape `UniversalCommand.toMCP()`'s `execute()` actually
  * consumes. Extracted as its own function so the mapping itself is
  * unit-testable without spinning up a full MCP transport.
  */
-export function toMCPCallExtra(extra?: {
+export function toMCPCallExtra(ctx?: {
   sessionId?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sendNotification?: (notification: any) => Promise<void>;
-  _meta?: Record<string, unknown>;
+  mcpReq?: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    notify?: (notification: any) => Promise<void>;
+    _meta?: Record<string, unknown>;
+  };
 }): MCPCallExtra {
   return {
-    sessionId: extra?.sessionId,
-    sendNotification: extra?.sendNotification as MCPCallExtra['sendNotification'],
-    meta: extra?._meta as MCPCallExtra['meta'],
+    sessionId: ctx?.sessionId,
+    sendNotification: ctx?.mcpReq?.notify as MCPCallExtra['sendNotification'],
+    meta: ctx?.mcpReq?._meta as MCPCallExtra['meta'],
   };
 }
 
@@ -100,14 +103,46 @@ export const CLAUDE_SESSION_HEADER = 'x-claude-session-id';
 /** Header carrying a company lock the caller's own env asserts (SUPERNAL_COMPANY_SLUG). */
 export const SUPERNAL_COMPANY_HEADER = 'x-supernal-company-slug';
 
+/**
+ * The caller identity a request's headers assert. The Claude session id travels in a
+ * header, never in tool args, so a model cannot pick a different session per call. An
+ * absent or malformed session id is dropped; the host's tenancy policy decides what that
+ * means. A company header is passed through unvalidated: a malformed value still means
+ * "lock me", so the tenancy resolver refuses it instead of treating it as absent.
+ */
+export function callContextFromHeaders(read: (name: string) => string | undefined): MCPCallContext {
+  const rawSession = read(CLAUDE_SESSION_HEADER);
+  const callerSessionId =
+    typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSession)
+      ? rawSession
+      : undefined;
+  const rawCompany = read(SUPERNAL_COMPANY_HEADER);
+  const callerCompanySlug = typeof rawCompany === 'string' ? rawCompany.slice(0, 200) : undefined;
+  const rawAgent = read('user-agent');
+  const callerUserAgent = typeof rawAgent === 'string' ? rawAgent.slice(0, 200) : undefined;
+  return { transport: 'http', callerSessionId, callerCompanySlug, callerUserAgent };
+}
+
+/**
+ * Same as callContextFromHeaders for a 2026-07-28 request. Fails closed: a request that
+ * carries no headers cannot be identified, so it is refused instead of served as anonymous.
+ */
+export function callContextFromRequestInfo(requestInfo?: {
+  headers?: { get(name: string): string | null };
+}): MCPCallContext {
+  const headers = requestInfo?.headers;
+  if (!headers) {
+    throw new Error('[mcp-http] request headers unavailable; refusing an unidentified caller.');
+  }
+  return callContextFromHeaders((name) => headers.get(name) ?? undefined);
+}
+
 export async function createMCPServer(
   registry: CommandRegistry,
   config: MCPServerConfig,
   callContext?: MCPCallContext
 ) {
-  const { Server } = await import('@modelcontextprotocol/sdk/server/index.js');
-  const { ListToolsRequestSchema, CallToolRequestSchema } =
-    await import('@modelcontextprotocol/sdk/types.js');
+  const { Server } = await import('@modelcontextprotocol/server');
 
   const notice = stalenessNotice(config);
   const instructions = [config.instructions, notice].filter(Boolean).join('\n\n');
@@ -120,7 +155,7 @@ export async function createMCPServer(
     }
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: registry.getAll().map((cmd) => {
       const t = cmd.toMCP();
       return { name: t.name, description: t.description, inputSchema: t.inputSchema };
@@ -141,7 +176,7 @@ export async function createMCPServer(
       : {}),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
     const { name, arguments: args } = request.params;
     const command = registry.findByMCPName(name);
     if (!command) {
@@ -157,9 +192,9 @@ export async function createMCPServer(
       // (the previous behavior here) double-JSON-encodes every tool result.
       // The mapped `extra` carries sessionId + real progress-notification
       // plumbing through to toMCP()'s execute() (see toMCPCallExtra above).
-      return await command
+      return (await command
         .toMCP()
-        .execute(args ?? {}, { ...toMCPCallExtra(extra), ...callContext });
+        .execute(args ?? {}, { ...toMCPCallExtra(ctx), ...callContext })) as CallToolResult;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -236,6 +271,12 @@ export async function createMCPHttpApp(
      * allowUnauthenticated with a non-loopback host. Default false.
      */
     confirmUnauthenticatedNetworkExposure?: boolean;
+    /**
+     * Which MCP protocol eras POST /mcp serves. 'legacy' (default) answers 2025-era
+     * traffic in JSON. 'both' also serves the 2026-07-28 era, and answers 2025-era
+     * requests as an event stream.
+     */
+    protocolEra?: 'legacy' | 'both';
   }
 ): Promise<{ app: unknown; start: (port?: number) => Promise<void> }> {
   const { timingSafeEqual, createHash } = await import('node:crypto');
@@ -282,6 +323,13 @@ export async function createMCPHttpApp(
         'would be reachable by any network caller with zero auth. If you genuinely intend this ' +
         '(e.g. a network-isolated sandbox with no real secrets), also pass ' +
         'options.confirmUnauthenticatedNetworkExposure: true.'
+    );
+  }
+
+  const protocolEra = options?.protocolEra ?? 'legacy';
+  if (protocolEra !== 'legacy' && protocolEra !== 'both') {
+    throw new Error(
+      `[mcp-http] unknown protocolEra "${String(protocolEra)}"; expected 'legacy' or 'both'.`
     );
   }
 
@@ -347,50 +395,44 @@ export async function createMCPHttpApp(
     );
   }
 
-  // MCP endpoint — stateless: one transport per request
-  expressApp.post('/mcp', async (req: unknown, res: unknown) => {
-    const { StreamableHTTPServerTransport } =
-      await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
-    // enableJsonResponse: true means a command's `context.stream` progress
-    // notifications (UniversalCommand.ts's toMCP()) are silently NOT sent over
-    // this transport — the SDK's JSON-response mode only writes the final
-    // result, never intermediate notifications/progress messages (confirmed by
-    // adversarial review, 2026-08-30). Streaming (`output.type: 'stream'`)
-    // still works correctly end-to-end over stdio/InMemoryTransport; it just
-    // has no observable effect for a caller connected through this HTTP route.
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+  if (protocolEra === 'legacy') {
+    // One transport and one server per request (stateless), answering 2025-era traffic in JSON.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expressApp.post('/mcp', async (req: any, res: any) => {
+      const { NodeStreamableHTTPServerTransport } = await import('@modelcontextprotocol/node');
+      // JSON-response mode writes only the final result, so a command's `context.stream`
+      // progress notifications are not sent over this route (stdio and in-memory still send them).
+      const transport = new NodeStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      const server = await createMCPServer(
+        registry,
+        config,
+        callContextFromHeaders((name) => {
+          const value = req.headers?.[name];
+          return typeof value === 'string' ? value : undefined;
+        })
+      );
+      res.on('close', () => transport.close());
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
     });
-    // The caller's Claude session id travels in a header, never in tool args, so a
-    // model cannot pick a different session per call. An absent or malformed value
-    // is passed as undefined; the host's tenancy policy decides what that means.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rawSession = (req as any).headers?.[CLAUDE_SESSION_HEADER];
-    const callerSessionId =
-      typeof rawSession === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawSession)
-        ? rawSession
-        : undefined;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const headers = (req as any).headers ?? {};
-    const rawCompany = headers[SUPERNAL_COMPANY_HEADER];
-    // Passed through unvalidated: a malformed company header still means "lock me", so the
-    // tenancy resolver refuses it instead of treating it as absent.
-    const callerCompanySlug = typeof rawCompany === 'string' ? rawCompany.slice(0, 200) : undefined;
-    const rawAgent = headers['user-agent'];
-    const callerUserAgent = typeof rawAgent === 'string' ? rawAgent.slice(0, 200) : undefined;
-    const server = await createMCPServer(registry, config, {
-      transport: 'http',
-      callerSessionId,
-      callerCompanySlug,
-      callerUserAgent,
+  } else {
+    // One handler serves 2025-era and 2026-07-28 traffic; the factory builds a fresh server per request.
+    // 2025-era requests are answered as an event stream, not JSON.
+    const { createMcpHandler } = await import('@modelcontextprotocol/server');
+    const { toNodeHandler } = await import('@modelcontextprotocol/node');
+    const mcpHandler = createMcpHandler((ctx) =>
+      createMCPServer(registry, config, callContextFromRequestInfo(ctx.requestInfo))
+    );
+    const nodeMcp = toNodeHandler(mcpHandler, {
+      onerror: (e) =>
+        console.error(`[mcp-http] ${config.name}@${config.version} handler error:`, e.message),
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (res as any).on('close', () => transport.close());
-    await server.connect(transport);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await transport.handleRequest(req as any, res as any, (req as any).body);
-  });
+    expressApp.post('/mcp', (req: any, res: any) => nodeMcp(req, res, req.body));
+  }
 
   // ── Error handler — MUST be registered last (Express matches by arity) ────
   // Catches the CORS-rejection error, a malformed-JSON body from express.json(),

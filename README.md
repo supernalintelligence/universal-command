@@ -24,7 +24,7 @@ Building tools for the AI age means maintaining **three separate implementations
 
 - **CLI** — Commander.js schema + handler + output formatting
 - **API** — Next.js/Express schema + handler + auth + caching
-- **MCP** — `@modelcontextprotocol/sdk` schema + handler + capabilities
+- **MCP** — `@modelcontextprotocol/server` schema + handler + capabilities
 
 That's 3× the code, 3× the tests, and inevitable drift between interfaces.
 
@@ -98,7 +98,7 @@ Install peer dependencies for the interfaces you need:
 ```bash
 npm install commander                    # CLI
 npm install next                         # Next.js API
-npm install @modelcontextprotocol/sdk    # MCP
+npm install @modelcontextprotocol/server @modelcontextprotocol/node   # MCP (Node 20 or newer)
 ```
 
 ---
@@ -176,10 +176,13 @@ $ curl -X POST /api/issues/create \
 
 ```typescript
 // mcp-server.ts
-import { Server } from '@modelcontextprotocol/sdk/server';
+import { Server } from '@modelcontextprotocol/server';
 import { issueCreate } from './commands/issue-create';
 
-const server = new Server({ name: 'my-mcp-server' });
+const server = new Server(
+  { name: 'my-mcp-server', version: '1.0.0' },
+  { capabilities: { tools: {} } }
+);
 
 server.setRequestHandler('tools/list', async () => ({
   tools: [issueCreate.toMCP()],

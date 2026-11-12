@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Breaking: the MCP adapter moved from `@modelcontextprotocol/sdk` (1.x) to `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (2.x), both optional peers. Requires Node 20 or newer and the 2.x packages' own `zod` 4.2 dependency. Version 0.2.0.
+- `createMCPHttpApp` takes `protocolEra`. The default, `'legacy'`, answers 2025-era traffic in JSON exactly as before. `'both'` also serves the 2026-07-28 era and answers 2025-era requests as an event stream.
+- A request that reaches the `'both'` handler without headers is refused instead of served as an anonymous caller.
+- `runtime` `startMCP` and the generated MCP server template use the 2.x packages.
+
 ### Fixed
 
 - `toNextAPI()` no longer returns HTTP 500 for every successful response when the package is loaded as ESM. `next/server` is now resolved at request time without a bare `require()`.

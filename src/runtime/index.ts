@@ -103,7 +103,9 @@ export class RuntimeServer {
   /**
    * Create command from schema and register it
    */
-  command<TInput = any, TOutput = any>(schema: CommandSchema<TInput, TOutput>): UniversalCommand<TInput, TOutput> {
+  command<TInput = any, TOutput = any>(
+    schema: CommandSchema<TInput, TOutput>
+  ): UniversalCommand<TInput, TOutput> {
     const cmd = new UniversalCommand(schema);
     this.register(cmd);
     return cmd;
@@ -166,90 +168,78 @@ export class RuntimeServer {
     const useScopes = config.useScopes !== false && this.useScopes;
     const enableScopeLoading = config.enableScopeLoading !== false && useScopes;
 
-    // Lazy load MCP SDK using require for flexibility
-    // Note: Explicit .js extension required due to SDK's ESM module type
+    // Lazy load the MCP SDK with require so the package works without it present
     let Server: any;
     let StdioServerTransport: any;
-    let ListToolsRequestSchema: any;
-    let CallToolRequestSchema: any;
-    let ListResourcesRequestSchema: any;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const serverModule = require('@modelcontextprotocol/sdk/server/index.js');
+      Server = require('@modelcontextprotocol/server').Server;
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const stdioModule = require('@modelcontextprotocol/sdk/server/stdio.js');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const typesModule = require('@modelcontextprotocol/sdk/types.js');
-      Server = serverModule.Server;
-      StdioServerTransport = stdioModule.StdioServerTransport;
-      ListToolsRequestSchema = typesModule.ListToolsRequestSchema;
-      CallToolRequestSchema = typesModule.CallToolRequestSchema;
-      ListResourcesRequestSchema = typesModule.ListResourcesRequestSchema;
+      StdioServerTransport = require('@modelcontextprotocol/server/stdio').StdioServerTransport;
     } catch (e: any) {
       throw new Error(
-        `@modelcontextprotocol/sdk package is required. Install with: npm install @modelcontextprotocol/sdk. Error: ${e.message}`
+        `@modelcontextprotocol/server package is required. Add it with your package manager. Error: ${e.message}`
       );
     }
 
     this.mcpServer = new Server(
       {
         name: config.name,
-        version: config.version
+        version: config.version,
       },
       {
         capabilities: {
           tools: {},
-          resources: useScopes ? {} : undefined
-        }
+          resources: useScopes ? {} : undefined,
+        },
       }
     );
 
     // Register resources/list handler for scope discovery (when using scopes)
     if (useScopes) {
-      this.mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
-        const scopes = this.scopeRegistry.getAllScopes().map(scope => ({
+      this.mcpServer.setRequestHandler('resources/list', async () => {
+        const scopes = this.scopeRegistry.getAllScopes().map((scope) => ({
           uri: `scope://${scope.id}`,
           name: scope.name,
           description: scope.description,
-          mimeType: 'application/json'
+          mimeType: 'application/json',
         }));
         return { resources: scopes };
       });
     }
 
     // Register tools/list handler
-    this.mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+    this.mcpServer.setRequestHandler('tools/list', async () => {
       // Get commands based on mode
-      const commands = useScopes
-        ? this.scopeRegistry.getLoadedCommands()
-        : this.registry.getAll();
+      const commands = useScopes ? this.scopeRegistry.getLoadedCommands() : this.registry.getAll();
 
-      const tools = commands.map(cmd => ({
+      const tools = commands.map((cmd) => ({
         name: cmd.getMCPToolName(),
         description: cmd.schema.description,
-        inputSchema: cmd['parametersToJSONSchema']()
+        inputSchema: cmd['parametersToJSONSchema'](),
       }));
 
       // Add scope management meta-tools if enabled
       if (enableScopeLoading) {
         tools.push({
           name: 'load_scope',
-          description: 'Load a scope to access its tools. Use resources/list to see available scopes.',
+          description:
+            'Load a scope to access its tools. Use resources/list to see available scopes.',
           inputSchema: {
             type: 'object',
             properties: {
               scope: {
                 type: 'string',
-                description: 'Scope ID to load (e.g., "requirement", "git", "deploy")'
+                description: 'Scope ID to load (e.g., "requirement", "git", "deploy")',
               },
               includeChildren: {
                 type: 'boolean',
                 description: 'Also load child scopes',
-                default: false
-              }
+                default: false,
+              },
             },
-            required: ['scope']
-          }
+            required: ['scope'],
+          },
         });
         tools.push({
           name: 'unload_scope',
@@ -259,19 +249,19 @@ export class RuntimeServer {
             properties: {
               scope: {
                 type: 'string',
-                description: 'Scope ID to unload'
-              }
+                description: 'Scope ID to unload',
+              },
             },
-            required: ['scope']
-          }
+            required: ['scope'],
+          },
         });
         tools.push({
           name: 'list_scopes',
           description: 'List all available scopes and their load status',
           inputSchema: {
             type: 'object',
-            properties: {}
-          }
+            properties: {},
+          },
         });
       }
 
@@ -279,7 +269,7 @@ export class RuntimeServer {
     });
 
     // Register tools/call handler
-    this.mcpServer.setRequestHandler(CallToolRequestSchema, async (request: any) => {
+    this.mcpServer.setRequestHandler('tools/call', async (request: any) => {
       const { name, arguments: args } = request.params;
 
       // Handle scope management meta-tools
@@ -290,18 +280,22 @@ export class RuntimeServer {
             this.scopeRegistry.loadScope(scopeId, { includeChildren: args.includeChildren });
             const loadedCount = this.scopeRegistry.getCommandsInScope(scopeId).length;
             return {
-              content: [{
-                type: 'text',
-                text: `Loaded scope "${scopeId}" with ${loadedCount} tools. Use tools/list to see updated tool list.`
-              }]
+              content: [
+                {
+                  type: 'text',
+                  text: `Loaded scope "${scopeId}" with ${loadedCount} tools. Use tools/list to see updated tool list.`,
+                },
+              ],
             };
           } catch (error: any) {
             return {
-              content: [{
-                type: 'text',
-                text: `Failed to load scope: ${error.message}`
-              }],
-              isError: true
+              content: [
+                {
+                  type: 'text',
+                  text: `Failed to load scope: ${error.message}`,
+                },
+              ],
+              isError: true,
             };
           }
         }
@@ -310,27 +304,31 @@ export class RuntimeServer {
           const scopeId = args.scope;
           this.scopeRegistry.unloadScope(scopeId);
           return {
-            content: [{
-              type: 'text',
-              text: `Unloaded scope "${scopeId}". Use tools/list to see updated tool list.`
-            }]
+            content: [
+              {
+                type: 'text',
+                text: `Unloaded scope "${scopeId}". Use tools/list to see updated tool list.`,
+              },
+            ],
           };
         }
 
         if (name === 'list_scopes') {
-          const scopes = this.scopeRegistry.getAllScopes().map(scope => ({
+          const scopes = this.scopeRegistry.getAllScopes().map((scope) => ({
             id: scope.id,
             name: scope.name,
             description: scope.description,
             loaded: this.scopeRegistry.isLoaded(scope.id),
             toolCount: this.scopeRegistry.getCommandsInScope(scope.id).length,
-            keywords: scope.keywords
+            keywords: scope.keywords,
           }));
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify(scopes, null, 2)
-            }]
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(scopes, null, 2),
+              },
+            ],
           };
         }
       }
@@ -378,10 +376,10 @@ export class RuntimeServer {
       const command = registry.findByAPIPath(commandPath) || registry.get(commandPath);
 
       if (!command) {
-        return new Response(
-          JSON.stringify({ error: `Command not found: ${commandPath}` }),
-          { status: 404, headers: { 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: `Command not found: ${commandPath}` }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       // Check if command supports this method
@@ -398,10 +396,10 @@ export class RuntimeServer {
       const handler = apiRoute[method as keyof typeof apiRoute];
 
       if (!handler) {
-        return new Response(
-          JSON.stringify({ error: `No handler for ${method}` }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: `No handler for ${method}` }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       return handler(request, context);
@@ -440,19 +438,19 @@ export class RuntimeServer {
           const args = {
             ...req.query,
             ...req.params,
-            ...(req.body || {})
+            ...(req.body || {}),
           };
 
           const result = await command.execute(args, {
             interface: 'api',
-            request: req
+            request: req,
           });
 
           res.json(result);
         } catch (error: any) {
           res.status(error.details?.status || 500).json({
             error: error.message,
-            details: error.details
+            details: error.details,
           });
         }
       });
@@ -471,12 +469,12 @@ export class RuntimeServer {
     mcpTool: string;
     method: string;
   }> {
-    return this.registry.getAll().map(cmd => ({
+    return this.registry.getAll().map((cmd) => ({
       name: cmd.schema.name,
       description: cmd.schema.description,
       apiPath: '/' + cmd.getAPIRoutePath().replace(/ /g, '/'),
       mcpTool: cmd.getMCPToolName(),
-      method: cmd.schema.api?.method || 'GET'
+      method: cmd.schema.api?.method || 'GET',
     }));
   }
 }
@@ -491,10 +489,11 @@ export function createRuntimeServer(registry?: CommandRegistry): RuntimeServer {
 /**
  * Quick helper to create and register commands in one call
  */
-export function defineCommands(
-  schemas: CommandSchema[]
-): { server: RuntimeServer; commands: UniversalCommand[] } {
+export function defineCommands(schemas: CommandSchema[]): {
+  server: RuntimeServer;
+  commands: UniversalCommand[];
+} {
   const server = new RuntimeServer();
-  const commands = schemas.map(schema => server.command(schema));
+  const commands = schemas.map((schema) => server.command(schema));
   return { server, commands };
 }
