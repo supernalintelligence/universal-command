@@ -36,6 +36,27 @@ describe('buildCommandTree', () => {
     expect(() => UniversalCommand.buildCommandTree([leaf, child])).not.toThrow();
   });
 
+  it('handles a three-level chain and a root-level parent in any order', async () => {
+    const chain = [
+      make('a b c d', 'D'),
+      make('a b', 'B'),
+      make('a b c', 'C'),
+      make('a', 'A'),
+      make('a x', 'X'),
+    ];
+    expect(await run(chain, ['a'])).toEqual(['A']);
+    expect(await run(chain, ['a', 'b'])).toEqual(['B']);
+    expect(await run(chain, ['a', 'b', 'c'])).toEqual(['C']);
+    expect(await run(chain, ['a', 'b', 'c', 'd'])).toEqual(['D']);
+    expect(await run(chain, ['a', 'x'])).toEqual(['X']);
+  });
+
+  it('keeps the given order of roots when no command is a parent', () => {
+    const names = ['zeta one', 'alpha two', 'mid three'].map((n) => make(n, n));
+    const roots = UniversalCommand.buildCommandTree(names).map((c: Command) => c.name());
+    expect(roots).toEqual(['zeta', 'alpha', 'mid']);
+  });
+
   it.each([
     ['leaf first', [leaf, child]],
     ['child first', [child, leaf]],

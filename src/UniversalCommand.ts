@@ -665,9 +665,14 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     const pathOf = (c: UniversalCommand): string[] =>
       c.schema.cli?.path || c.schema.name.split(' ');
 
-    // Shorter paths first, so a leaf such as 'room approve' exists before 'room approve precheck'
-    // needs it as a parent (Commander rejects two sibling commands with one name).
-    const ordered = [...commands].sort((a, b) => pathOf(a).length - pathOf(b).length);
+    // A leaf such as 'room approve' must exist before 'room approve precheck' needs it as a parent
+    // (Commander rejects two sibling commands with one name). Only such parents move; the rest keep their order.
+    const joined = commands.map((c) => pathOf(c).join(' '));
+    const isParent = (i: number) => joined.some((other) => other.startsWith(`${joined[i]} `));
+    const ordered = [
+      ...commands.filter((_, i) => isParent(i)).sort((a, b) => pathOf(a).length - pathOf(b).length),
+      ...commands.filter((_, i) => !isParent(i)),
+    ];
 
     for (const command of ordered) {
       const path = pathOf(command);
