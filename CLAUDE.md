@@ -10,8 +10,8 @@ Core abstraction for the Supernal platform. Define a command once and auto-gener
 - Build: tsup (multiple entry points)
 - Test: Vitest
 - Runtime: Node.js >= 20
-- Peer deps (all optional): commander, express, next, @modelcontextprotocol/server, @modelcontextprotocol/node
-- Dependencies: ajv, zod, fs-extra
+- Peer deps (all optional): commander, express, next
+- Dependencies: ajv, zod, fs-extra, @modelcontextprotocol/server, @modelcontextprotocol/node
 
 ## Build & Test
 

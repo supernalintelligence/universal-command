@@ -11,7 +11,7 @@ import type { MCPCallExtra } from '../types.js';
 
 /**
  * Maps a real @modelcontextprotocol/server handler context (`ctx`, kept loosely
- * typed here — the SDK is a lazy-loaded, optional peer dependency; this
+ * typed here — the SDK is a lazy-loaded dependency; this
  * module dynamic-imports it, never a static import) into the SDK-agnostic
  * `MCPCallExtra` shape `UniversalCommand.toMCP()`'s `execute()` actually
  * consumes. Extracted as its own function so the mapping itself is

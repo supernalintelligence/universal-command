@@ -177,7 +177,7 @@ export class RuntimeServer {
         .StdioServerTransport;
     } catch (e: any) {
       throw new Error(
-        `@modelcontextprotocol/server package is required. Add it with your package manager. Error: ${e.message}`
+        `@modelcontextprotocol/server package failed to load. Reinstall @supernal/universal-command. Error:${e.message}`
       );
     }
 

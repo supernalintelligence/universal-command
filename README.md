@@ -93,12 +93,11 @@ With Universal Command, adding MCP support to an existing CLI takes **one line**
 npm install @supernal/universal-command
 ```
 
-Install peer dependencies for the interfaces you need:
+Install peer dependencies for the interfaces you need. The MCP interface needs no extra install: `@modelcontextprotocol/server` and `@modelcontextprotocol/node` are regular dependencies of this package (Node 20 or newer).
 
 ```bash
 npm install commander                    # CLI
 npm install next                         # Next.js API
-npm install @modelcontextprotocol/server @modelcontextprotocol/node   # MCP (Node 20 or newer)
 ```
 
 ---
@@ -195,7 +194,7 @@ server.setRequestHandler('tools/call', async (request) => {
 });
 ```
 
-`createMCPHttpApp` (from `@supernal/universal-command/mcp`) serves the registry over HTTP. Its default, `protocolEra: 'legacy'`, answers 2025-era clients in JSON. With `protocolEra: 'both'` it also serves the 2026-07-28 era, and it answers 2025-era clients with an event stream (`text/event-stream`) instead of JSON. A caller that reads only a JSON body, such as a bare `fetch(...).json()`, breaks when you switch modes; parse the `data:` lines or use an MCP client. In `'both'` mode, call the returned `close()` when you listen on `app` yourself.
+`createMCPHttpApp` (from `@supernal/universal-command/mcp`) serves the registry over HTTP. Its default, `protocolEra: 'legacy'`, answers 2025-era clients in JSON. With `protocolEra: 'both'` it also serves the 2026-07-28 era, and it answers 2025-era clients with an event stream (`text/event-stream`) instead of JSON. A caller that reads only a JSON body, such as a bare `fetch(...).json()`, breaks when you switch modes; parse the `data:` lines or use an MCP client. In `'both'` mode, call the returned `close()` when you listen on `app` yourself. Only `POST /mcp` is routed, so a `GET` or `DELETE` on `/mcp` returns Express's 404, not a protocol error.
 
 ---
 

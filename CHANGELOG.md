@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Breaking: the MCP adapter moved from `@modelcontextprotocol/sdk` (1.x) to `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (2.x), both optional peers. Requires Node 20 or newer and the 2.x packages' own `zod` 4.2 dependency. Version 0.2.0.
+- Breaking: the MCP adapter moved from `@modelcontextprotocol/sdk` (1.x) to `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (2.x), now regular dependencies of this package, so a consumer needs no extra install. Requires Node 20 or newer and the 2.x packages' own `zod` 4.2 dependency. Version 0.2.0.
 - `createMCPHttpApp` takes `protocolEra`. The default, `'legacy'`, answers 2025-era traffic in JSON exactly as before. `'both'` also serves the 2026-07-28 era and answers 2025-era requests as an event stream.
 - In `'both'` mode the caller identity builder refuses a request object that carries no headers (a defensive check: the SDK always passes a real request, so this does not occur through `toNodeHandler`).
 - `'both'` mode refuses `subscriptions/listen` (`maxSubscriptions: 0`), since this server publishes no change events, and `createMCPHttpApp` now also returns `close()`, which aborts open 2026-07-28 exchanges. `start()` calls it when its server closes.

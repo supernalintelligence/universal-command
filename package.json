@@ -87,9 +87,7 @@
     "commander": "^12.0.0",
     "express": "^4.0.0 || ^5.0.0",
     "cors": "^2.8.5",
-    "next": "^14.0.0 || ^15.0.0 || ^16.0.0",
-    "@modelcontextprotocol/server": "^2.4.0",
-    "@modelcontextprotocol/node": "^2.1.2"
+    "next": "^14.0.0 || ^15.0.0 || ^16.0.0"
   },
   "peerDependenciesMeta": {
     "commander": {
@@ -103,23 +101,17 @@
     },
     "cors": {
       "optional": true
-    },
-    "@modelcontextprotocol/server": {
-      "optional": true
-    },
-    "@modelcontextprotocol/node": {
-      "optional": true
     }
   },
   "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
     "ajv": "^8.12.0",
     "fs-extra": "^11.2.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
-    "@modelcontextprotocol/node": "2.1.2",
-    "@modelcontextprotocol/server": "2.4.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/fs-extra": "^11.0.4",
