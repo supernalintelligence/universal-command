@@ -18,10 +18,7 @@ export class MCPServerGenerator implements GeneratorPlugin<MCPServerOptions, Gen
   readonly description = 'Generate standalone MCP server';
   readonly outputExtensions = ['.ts', '.js'];
 
-  async generate(
-    registry: CommandRegistry,
-    options: MCPServerOptions
-  ): Promise<GeneratorResult> {
+  async generate(registry: CommandRegistry, options: MCPServerOptions): Promise<GeneratorResult> {
     const content = this.generateServerContent(registry, options);
 
     if (!options.dryRun) {
@@ -32,11 +29,13 @@ export class MCPServerGenerator implements GeneratorPlugin<MCPServerOptions, Gen
     }
 
     return {
-      files: [{
-        path: options.outputPath,
-        content,
-        created: !options.dryRun
-      }]
+      files: [
+        {
+          path: options.outputPath,
+          content,
+          created: !options.dryRun,
+        },
+      ],
     };
   }
 
@@ -47,7 +46,7 @@ export class MCPServerGenerator implements GeneratorPlugin<MCPServerOptions, Gen
     const ts = options.typescript !== false;
 
     // Serialize schemas without functions
-    const commandSchemas = commands.map(cmd => this.serializeSchema(cmd.schema));
+    const commandSchemas = commands.map((cmd) => this.serializeSchema(cmd.schema));
 
     return `/**
  * Auto-generated MCP Server
@@ -58,22 +57,26 @@ export class MCPServerGenerator implements GeneratorPlugin<MCPServerOptions, Gen
  * DO NOT EDIT MANUALLY
  */
 
-${ts ? "import { Server } from '@modelcontextprotocol/sdk/server';" : "const { Server } = require('@modelcontextprotocol/sdk/server');"}
-${ts ? "import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio';" : "const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio');"}
+${ts ? "import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';" : "const { StdioServerTransport } = require('@modelcontextprotocol/server/stdio');"}
 import { createMCPServer } from '@supernal/universal-command/mcp';
 import { CommandRegistry, UniversalCommand } from '@supernal/universal-command';
 
 const registry = new CommandRegistry();
 
-${commandSchemas.map(schema => `registry.register(new UniversalCommand(${JSON.stringify(schema, null, 2)}));`).join('\n\n')}
+${commandSchemas.map((schema) => `registry.register(new UniversalCommand(${JSON.stringify(schema, null, 2)}));`).join('\n\n')}
 
-const server = createMCPServer(registry, {
-  name: '${serverName}',
-  version: '${serverVersion}'
+async function main() {
+  const server = await createMCPServer(registry, {
+    name: '${serverName}',
+    version: '${serverVersion}'
+  });
+  await server.connect(new StdioServerTransport());
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });
-
-const transport = new StdioServerTransport();
-server.connect(transport);
 
 console.error('MCP Server: ${serverName} v${serverVersion}');
 console.error('Available tools: ${commands.length}');

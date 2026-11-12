@@ -21,5 +21,11 @@ export default defineConfig({
   clean: false,
   splitting: false,
   treeshake: true,
-  external: ['commander', 'next', 'next/server', '@modelcontextprotocol/sdk'],
+  external: [
+    'commander',
+    'next',
+    'next/server',
+    '@modelcontextprotocol/server',
+    '@modelcontextprotocol/node',
+  ],
 });

@@ -251,7 +251,7 @@ describe('session tenancy over the MCP HTTP transport', () => {
     expect(readLog().filter((e) => e['event'] === 'unidentified-caller')).toHaveLength(1);
   });
 
-  it('X-Supernal-Company-Slug locks a caller with no session id', async () => {
+  it("'platform' policy: X-Supernal-Company-Slug narrows a caller with no session id to that company", async () => {
     setUnidentifiedCallerPolicy('platform');
     const hdr = { 'x-supernal-company-slug': 'a' };
     expect(JSON.parse((await callTool(url, 'sc_lock_probe', {}, undefined, hdr)).text)).toEqual({
@@ -261,6 +261,27 @@ describe('session tenancy over the MCP HTTP transport', () => {
     const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, undefined, hdr);
     expect(res.isError).toBe(true);
     expect(res.text).toContain("locked to company 'a'");
+  });
+
+  it("'refuse' policy: X-Supernal-Company-Slug alone supplies no company and is refused", async () => {
+    setUnidentifiedCallerPolicy('refuse');
+    const hdr = { 'x-supernal-company-slug': 'a' };
+    expect(
+      JSON.parse((await callTool(url, 'sc_lock_probe', {}, undefined, hdr)).text)
+    ).toMatchObject({ tier: 'unidentified', companySlug: null });
+    for (const company of ['a', 'b']) {
+      const res = await callTool(url, 'sc_scoped_write', { company }, undefined, hdr);
+      expect(res.isError, company).toBe(true);
+    }
+  });
+
+  it("'refuse' policy: a session pinned to A that drops its session header cannot pick company B", async () => {
+    writeSidecar('sess-a', { tier: 'board', companySlug: 'a' });
+    const hdr = { 'x-supernal-company-slug': 'b' };
+    for (const sessionId of [undefined, 'bad id with spaces']) {
+      const res = await callTool(url, 'sc_scoped_write', { company: 'b' }, sessionId, hdr);
+      expect(res.isError, String(sessionId)).toBe(true);
+    }
   });
 
   it('X-Supernal-Company-Slug never unlocks: it locks an operator session too', async () => {

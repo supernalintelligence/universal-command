@@ -746,8 +746,7 @@ describe('toMCPCallExtra', () => {
     const sendNotification = vi.fn(async () => {});
     const mapped = toMCPCallExtra({
       sessionId: 'sess-1',
-      sendNotification,
-      _meta: { progressToken: 'tok-1', extra: 'field' },
+      mcpReq: { notify: sendNotification, _meta: { progressToken: 'tok-1', extra: 'field' } },
     });
 
     expect(mapped.sessionId).toBe('sess-1');
@@ -793,8 +792,8 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
   }
 
   it('delivers one real progress notification per chunk, then the final JSON result', async () => {
-    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+    const { Client } = await import('@modelcontextprotocol/client');
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = await createMCPServer(buildStreamingRegistry(['first', 'second', 'third']), {
@@ -807,11 +806,14 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
 
     try {
       const progressUpdates: Array<{ progress: number; message?: string }> = [];
-      const result = await client.callTool({ name: 'sc_stream_test', arguments: {} }, undefined, {
-        onprogress: (p: { progress: number; message?: string }) => {
-          progressUpdates.push({ progress: p.progress, message: p.message });
-        },
-      });
+      const result = await client.callTool(
+        { name: 'sc_stream_test', arguments: {} },
+        {
+          onprogress: (p: { progress: number; message?: string }) => {
+            progressUpdates.push({ progress: p.progress, message: p.message });
+          },
+        }
+      );
 
       expect(progressUpdates).toEqual([
         { progress: 1, message: 'first' },
@@ -828,8 +830,8 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
   });
 
   it('still returns a single final result with no progress notifications when the caller does not ask for progress', async () => {
-    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+    const { Client } = await import('@modelcontextprotocol/client');
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = await createMCPServer(buildStreamingRegistry(['a', 'b']), {
@@ -868,14 +870,18 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
     process.on('uncaughtException', onUncaught);
 
     try {
-      const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+      const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+      const { Client } = await import('@modelcontextprotocol/client');
 
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       const registry = new CommandRegistry();
       let handlerDone: () => void = () => {};
       const handlerFinished = new Promise<void>((resolve) => {
         handlerDone = resolve;
+      });
+      let handlerStarted: () => void = () => {};
+      const handlerRunning = new Promise<void>((resolve) => {
+        handlerStarted = resolve;
       });
       registry.register(
         new UniversalCommand({
@@ -884,9 +890,10 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
           input: { parameters: [] },
           output: { type: 'stream' },
           handler: async (_args, context) => {
-            // Give the test time to close the client transport before this
-            // write fires, so its sendNotification call has a real transport
-            // to fail against.
+            // Signal that the call is in flight, then give the test time to close
+            // the client transport before this write fires, so its sendNotification
+            // call has a real transport to fail against.
+            handlerStarted();
             await new Promise((r) => setTimeout(r, 20));
             context.stream!.write('this write races a closed transport');
             handlerDone();
@@ -903,11 +910,15 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
       await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
       const callPromise = client
-        .callTool({ name: 'sc_stream_crash_test', arguments: {} }, undefined, {
-          onprogress: () => {},
-        })
+        .callTool(
+          { name: 'sc_stream_crash_test', arguments: {} },
+          {
+            onprogress: () => {},
+          }
+        )
         .catch((err: unknown) => err); // either outcome is fine, we're testing for no crash
 
+      await handlerRunning;
       await client.close();
       await handlerFinished;
       await callPromise;
@@ -922,8 +933,8 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
 
 describe('createMCPServer — instructions option', () => {
   it('joins config.instructions with the staleness notice and passes capabilities through', async () => {
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { Client } = await import('@modelcontextprotocol/client');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/server');
     const server = await createMCPServer(buildRegistry(), {
       name: 'test',
       version: '1.0.0',

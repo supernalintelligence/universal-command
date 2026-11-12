@@ -25,7 +25,8 @@
  *   - MCP over HTTP: ExecutionContext.callerSessionId from X-Claude-Session-Id. One
  *     daemon serves every session, so its own env says nothing about the caller. An
  *     X-Supernal-Company-Slug header (callerCompanySlug) locks the call to that company; it
- *     can only add a lock to a platform/unlocked caller, never lift or change one. A header
+ *     can only add a lock to a platform record, never lift or change one, and with no valid
+ *     session id it is refused under the default 'refuse' policy (under 'platform' it narrows). A header
  *     naming a different company than an existing lock (sidecar or SUPERNAL_COMPANY_SLUG) is
  *     refused outright. A request with neither header is unidentified:
  *     setUnidentifiedCallerPolicy('refuse') (the default) refuses it anything company-scoped,
@@ -265,6 +266,18 @@ export function resolveContextCompanyLock(context?: Partial<ExecutionContext>): 
     // An unidentified caller (no record, no company) stays refused: the header can only AGREE with a record's
     // company or narrow a platform record, never supply the company itself.
     if (base && base.tier === 'unidentified') return base;
+    // No session identity at all (header missing, malformed or duplicated): the header can only narrow what
+    // the unidentified-caller policy would grant. Under 'refuse' it supplies no company; under 'platform'
+    // that caller already has platform access, so locking it to the header is a narrowing.
+    if (!base && unidentifiedCallerPolicy === 'refuse') {
+      return {
+        tier: 'unidentified',
+        companySlug: null,
+        refusal:
+          'Refused: X-Supernal-Company-Slug without a valid X-Claude-Session-Id cannot establish a company. ' +
+          'The header can only agree with a session lock, never supply one.',
+      };
+    }
     // The header may only add a lock to an unlocked caller, never change an existing one.
     if (!base || base.tier !== 'locked' || (!base.companySlug && !base.companyId)) {
       return { tier: 'locked', companySlug: headerCompany, ...idField(asCompanyId(headerCompany)) };

@@ -2,16 +2,16 @@
 
 > **Growth Gate:** Does this compound self-sustaining growth? If not, stop. See root CLAUDE.md.
 
-Core abstraction for the Supernal platform. Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.1.0, MIT, open source.
+Core abstraction for the Supernal platform. Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.2.0, MIT, open source.
 
 ## Tech Stack
 
 - TypeScript (ESM, `"type": "module"`, dual CJS/ESM output)
 - Build: tsup (multiple entry points)
 - Test: Vitest
-- Runtime: Node.js >= 18
-- Peer deps (all optional): commander, express, next, @modelcontextprotocol/sdk
-- Dependencies: ajv, zod, fs-extra
+- Runtime: Node.js >= 20
+- Peer deps (all optional): commander, express, next
+- Dependencies: ajv, zod, fs-extra, @modelcontextprotocol/server, @modelcontextprotocol/node
 
 ## Build & Test
 
