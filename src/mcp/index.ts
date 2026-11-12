@@ -499,7 +499,9 @@ export async function createMCPHttpApp(
       });
       srv.on('error', reject);
       srv.on('close', () => {
-        void closeHandler();
+        closeHandler().catch((e: Error) =>
+          console.error(`[mcp-http] ${config.name}@${config.version} close error:`, e?.message)
+        );
       });
     });
   };
