@@ -206,9 +206,9 @@ describe('createMCPHttpApp — request-level enforcement', () => {
 
 describe('createMCPHttpApp — protocol content through the real SDK transport', () => {
   // Unlike the request-level enforcement tests above (which only assert on HTTP
-  // status codes), these exercise the actual StreamableHTTPServerTransport +
+  // status codes), these exercise the actual Streamable HTTP transport +
   // Server round trip and assert on the JSON-RPC response body — so an
-  // @modelcontextprotocol/sdk upgrade that silently breaks tool listing or
+  // MCP SDK upgrade that silently breaks tool listing or
   // invocation (transport wiring, schema shape, content encoding) fails a test
   // instead of shipping unnoticed.
   async function listenEphemeral(
@@ -767,8 +767,7 @@ describe('createMCPServer — real MCP progress notifications end-to-end', () =>
   // Exercises the full real stack (no mocked transport): a real SDK Client
   // and Server connected over InMemoryTransport, a real tools/call with an
   // onprogress callback (which makes the Client auto-populate
-  // `_meta.progressToken` — see @modelcontextprotocol/sdk's
-  // shared/protocol.ts request()), and asserts the client actually receives
+  // `_meta.progressToken` in request()), and asserts the client actually receives
   // progress notifications for a streaming command's chunks. This is the
   // strongest verification that toMCP()'s streaming fix (P0-4) is wired
   // correctly against the real SDK, not just a hand-built fake `extra`.

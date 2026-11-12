@@ -464,15 +464,13 @@ export interface ValidationResult<T = any> {
 }
 
 /**
- * Minimal, SDK-agnostic subset of @modelcontextprotocol/sdk's
- * `RequestHandlerExtra` that toMCP()'s execute() actually consumes — for
- * real MCP progress notifications on a streaming command, and for session
- * identification. types.ts intentionally never imports the SDK statically
- * (it's a lazy-loaded, optional peer dependency everywhere else in this
- * package — see UniversalCommand.ts's toCLI()/toMCP()). Callers construct
- * this from whatever real SDK version they have wired up; see
- * mcp/index.ts's toMCPCallExtra() for the reference mapping from a real
- * SDK `RequestHandlerExtra`.
+ * Minimal, SDK-agnostic subset of the MCP server handler context
+ * (`@modelcontextprotocol/server`) that toMCP()'s execute() actually
+ * consumes — for real MCP progress notifications on a streaming command, and
+ * for session identification. types.ts never imports the SDK statically.
+ * Callers construct this from whatever SDK version they have wired up; see
+ * mcp/index.ts's toMCPCallExtra() for the reference mapping from the v2
+ * handler context.
  */
 export interface MCPCallExtra {
   /** The session ID from the MCP transport, if available. */
@@ -481,7 +479,7 @@ export interface MCPCallExtra {
    * Sends a raw MCP notification tied to the in-flight tool call (e.g. a
    * `notifications/progress` update). Transport-routing behavior — using
    * this instead of a bare server-wide notify — matches the SDK's own
-   * `RequestHandlerExtra.sendNotification`.
+   * `ctx.mcpReq.notify`.
    */
   sendNotification?: (notification: {
     method: string;

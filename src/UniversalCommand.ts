@@ -923,8 +923,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
           // `if (context.stream)` before writing:
           //   - when the caller supplied BOTH a real sendNotification and a
           //     progressToken (mirrors the SDK's own
-          //     `extra._meta?.progressToken !== undefined` gate — see
-          //     @modelcontextprotocol/sdk's examples/server/progressExample.ts),
+          //     `_meta?.progressToken !== undefined` gate for progress),
           //     each chunk written is relayed as a real
           //     `notifications/progress` MCP notification;
           //   - otherwise (no progress-capable caller/transport), writes go to a
