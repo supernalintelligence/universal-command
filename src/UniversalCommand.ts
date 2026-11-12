@@ -662,8 +662,15 @@ export class UniversalCommand<TInput = any, TOutput = any> {
     // Build tree structure
     const tree: Map<string, any> = new Map();
 
-    for (const command of commands) {
-      const path = command.schema.cli?.path || command.schema.name.split(' ');
+    const pathOf = (c: UniversalCommand): string[] =>
+      c.schema.cli?.path || c.schema.name.split(' ');
+
+    // Shorter paths first, so a leaf such as 'room approve' exists before 'room approve precheck'
+    // needs it as a parent (Commander rejects two sibling commands with one name).
+    const ordered = [...commands].sort((a, b) => pathOf(a).length - pathOf(b).length);
+
+    for (const command of ordered) {
+      const path = pathOf(command);
 
       // Navigate/create tree
       let current: any = null;
@@ -691,6 +698,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       const leafCmd = command.toCLI();
       if (current) {
         current.addCommand(leafCmd);
+        tree.set(path.join('.'), leafCmd);
       } else {
         tree.set(path[0], leafCmd);
       }
