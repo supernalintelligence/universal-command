@@ -475,7 +475,7 @@ describe('resolveContextCompanyLock / agent checks', () => {
     ).toMatchObject({ tier: 'locked', companySlug: 'a' });
   });
 
-  // Shared test vectors: the same table is in supernal-code-package/src/cli/utils/__tests__/session-tenancy-guard-agent-context.test.ts.
+  // Shared test vectors: the host CLI keeps the same table in its own test suite.
   // envIsTrusted is passed only by resolveRequestCompanyLock (the dashboard server's api interface).
   it.each([
     [

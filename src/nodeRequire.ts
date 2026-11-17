@@ -4,14 +4,12 @@
  *
  *  - A top-level `import { createRequire } from 'node:module'` gets hoisted by
  *    tsup/esbuild into a static `import 'module'` in the ESM dist, which the
- *    dashboard CLIENT bundle cannot resolve (recurring regression — see
- *    da7add6 / PR #312).
+ *    browser client bundle cannot resolve (a recurring regression).
  *  - A bare `require(...)` is rewritten by esbuild's ESM output to a THROWING
  *    `__require` stub (it also rewrites the `typeof require` guard to
  *    `typeof __require`, defeating it), so pure-ESM Node consumers (the
  *    repotype CLI bin) died with "commander package is required" even though
- *    commander was installed — failing the pre-push board-structure gate for
- *    every board-touching push.
+ *    commander was installed.
  *
  * The primary path is `process.getBuiltinModule` (Node >= 20.16): a plain
  * guarded RUNTIME global access that no bundler rewrites, hoists, or tries to

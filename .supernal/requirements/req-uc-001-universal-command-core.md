@@ -4,7 +4,6 @@ title: Universal Command Core Abstraction
 status: Done
 priority: Critical
 category: core
-upstream_ref: https://github.com/supernalintelligence/supernal-coding/blob/main/docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
 tests:
   - src/UniversalCommand.test.ts
 created: '2026-01-09'

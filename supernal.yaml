@@ -7,11 +7,6 @@ package:
   type: standalone
   license: MIT
 
-# Reference to parent monorepo (for full requirement context)
-upstream:
-  repo: https://github.com/supernalintelligence/supernal-coding
-  docs_path: docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
-
 # Local requirements (self-contained in this package)
 requirements:
   prefix: REQ-UC

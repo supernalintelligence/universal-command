@@ -81,7 +81,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src",
     "prepublishOnly": "pnpm run build && pnpm run test:ci",
-    "prepare": "husky && sh scripts/ensure-refguard-hook.sh && pnpm run build"
+    "prepare": "if command -v sc >/dev/null 2>&1; then husky && sh scripts/ensure-refguard-hook.sh; fi; pnpm run build"
   },
   "peerDependencies": {
     "commander": "^12.0.0",

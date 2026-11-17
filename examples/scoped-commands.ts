@@ -1,7 +1,7 @@
 /**
- * Example: SC Commands with Runtime Registration
+ * Example: Scoped commands with runtime registration
  *
- * This shows how SC could gradually migrate to universal-command
+ * This shows how an existing CLI can adopt universal-command
  * with runtime registration (no code generation step).
  *
  * Pattern:
@@ -22,7 +22,7 @@ import { UniversalCommand, createRuntimeServer, type Scope } from '@supernal/uni
 // ============================================================================
 
 /**
- * Scope definitions for SC commands
+ * Scope definitions for a development CLI
  * These group related tools and enable O(1) lookup
  */
 export const requirementScope: Scope = {
@@ -49,11 +49,11 @@ export const deployScope: Scope = {
 };
 
 // ============================================================================
-// 2. Define Commands (these would live in supernal-code-package/src/commands/)
+// 2. Define Commands (these would live in your own project's src/commands/)
 // ============================================================================
 
 /**
- * sc requirement list
+ * my-cli requirement list
  */
 export const requirementList = new UniversalCommand({
   name: 'requirement list',
@@ -92,7 +92,7 @@ export const requirementList = new UniversalCommand({
 
   handler: async (args, context) => {
     // This is the SINGLE implementation used by CLI, API, and MCP
-    // In real SC, this would call RequirementManager.list()
+    // In a real project, this would call RequirementManager.list()
 
     const requirements = [
       { id: 'REQ-001', title: 'User authentication', status: 'approved' },
@@ -141,7 +141,7 @@ export const requirementList = new UniversalCommand({
 });
 
 /**
- * sc requirement create
+ * my-cli requirement create
  */
 export const requirementCreate = new UniversalCommand({
   name: 'requirement create',
@@ -192,7 +192,7 @@ export const requirementCreate = new UniversalCommand({
       createdAt: new Date().toISOString(),
     };
 
-    // In real SC: await RequirementManager.create(requirement)
+    // In a real project: await RequirementManager.create(requirement)
 
     return {
       success: true,
@@ -206,7 +206,7 @@ export const requirementCreate = new UniversalCommand({
 });
 
 /**
- * sc health check
+ * my-cli health check
  * This is a global command (no scope) - always available
  */
 export const healthCheck = new UniversalCommand({
@@ -232,7 +232,7 @@ export const healthCheck = new UniversalCommand({
   handler: async (args, context) => {
     const checks = {
       git: { status: 'ok', message: 'Git repository initialized' },
-      config: { status: 'ok', message: 'supernal.yaml found' },
+      config: { status: 'ok', message: 'project.yaml found' },
       dependencies: { status: 'ok', message: 'All dependencies installed' },
       tests: { status: 'warning', message: '3 tests skipped' },
     };
@@ -270,7 +270,7 @@ export const healthCheck = new UniversalCommand({
 // ============================================================================
 
 /**
- * Create the SC runtime server
+ * Create the runtime server
  * This serves CLI, API, and MCP from the same command definitions
  *
  * Scope-based features:
@@ -278,7 +278,7 @@ export const healthCheck = new UniversalCommand({
  * - Only loaded scopes' tools are exposed to MCP
  * - AI can use load_scope/unload_scope to manage context
  */
-export function createSCServer() {
+export function createServer() {
   const server = createRuntimeServer();
 
   // Register scope definitions (for metadata/discovery)
@@ -304,9 +304,9 @@ export function createSCServer() {
 // --- CLI Usage (in bin/sc.ts) ---
 /*
 import { Command } from 'commander';
-import { createSCServer } from './sc-commands';
+import { createServer } from './scoped-commands';
 
-const server = createSCServer();
+const server = createServer();
 const program = new Command('sc');
 
 // Add all commands to CLI
@@ -319,9 +319,9 @@ program.parse();
 
 // --- Next.js API Usage (in app/api/[...path]/route.ts) ---
 /*
-import { createSCServer } from '@/lib/sc-commands';
+import { createServer } from '@/lib/scoped-commands';
 
-const server = createSCServer();
+const server = createServer();
 const handlers = server.getNextHandlers();
 
 export const GET = handlers.GET;
@@ -332,14 +332,14 @@ export const DELETE = handlers.DELETE;
 
 // --- MCP Server Usage (in mcp-server.ts) ---
 /*
-import { createSCServer } from './sc-commands';
+import { createServer } from './scoped-commands';
 
-const server = createSCServer();
+const server = createServer();
 
 // Start MCP server with scope-based tool loading
 // AI can use load_scope/unload_scope tools to manage context
 await server.startMCP({
-  name: 'sc-mcp-server',
+  name: 'my-cli-mcp-server',
   version: '1.0.0',
   transport: 'stdio',
   useScopes: true,           // Enable scope-based loading
@@ -355,10 +355,10 @@ await server.startMCP({
 // --- Express Usage (alternative to Next.js) ---
 /*
 import express from 'express';
-import { createSCServer } from './sc-commands';
+import { createServer } from './scoped-commands';
 
 const app = express();
-const server = createSCServer();
+const server = createServer();
 
 app.use('/api', server.getExpressRouter());
 app.listen(3000);
@@ -369,10 +369,10 @@ app.listen(3000);
 // ============================================================================
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = createSCServer();
+  const server = createServer();
   const scopeRegistry = server.getScopeRegistry();
 
-  console.log('SC Commands (Runtime Registration with Scopes):\n');
+  console.log('Scoped commands (runtime registration with scopes):\n');
 
   // Show scopes
   console.log('Scopes:');

@@ -65,13 +65,14 @@ Response: "Loaded scope 'requirement' with 5 tools. Use tools/list to see update
 ```
 
 Now `tools/list` returns:
+
 ```json
 {
   "tools": [
     { "name": "sc_health_context" },
     { "name": "sc_requirement_list" },
     { "name": "sc_requirement_create" },
-    { "name": "sc_requirement_update" },
+    { "name": "sc_requirement_update" }
     // ...
   ]
 }
@@ -106,7 +107,7 @@ const requirementScope: Scope = {
 
   // Optional: Auto-loading behavior
   autoLoad: false,
-  loadWithParent: true
+  loadWithParent: true,
 };
 ```
 
@@ -118,7 +119,7 @@ Commands specify their scope in the schema:
 const requirementList = new UniversalCommand({
   name: 'requirement list',
   description: 'List project requirements',
-  scope: 'requirement',  // <-- Scope assignment
+  scope: 'requirement', // <-- Scope assignment
   // ...
 });
 ```
@@ -148,33 +149,33 @@ registry.findByAPIPath('requirement/list');
 4. **State-Aware**: Scopes can require project state
 5. **Hierarchical**: Parent/child scope relationships
 
-## Usage in SC
+## Example: a development CLI
 
 ### Current Implementation
 
 ```javascript
-// bin/sc-mcp-server.js
-const server = createSCUniversalServer();
+// bin/mcp-server.js
+const server = createUniversalServer();
 
 await server.startMCP({
-  name: 'sc-universal-commands',
-  version: '1.0.0',
-  useScopes: true,           // Enable scope-based loading
-  enableScopeLoading: true   // Add load_scope/unload_scope meta-tools
+  name: 'my-cli-commands',
+  version: '0.2.0',
+  useScopes: true, // Enable scope-based loading
+  enableScopeLoading: true, // Add load_scope/unload_scope meta-tools
 });
 ```
 
-### Planned Scopes for SC
+### Example scopes
 
-| Scope | Description | Tools |
-|-------|-------------|-------|
-| `global` | Always available | health, help, search |
+| Scope         | Description            | Tools                          |
+| ------------- | ---------------------- | ------------------------------ |
+| `global`      | Always available       | health, help, search           |
 | `requirement` | Requirement management | list, create, update, validate |
-| `git` | Git operations | commit, branch, merge, status |
-| `planning` | Planning & features | feature, phase, epic |
-| `deploy` | Deployment | build, deploy, release |
-| `test` | Testing | run, coverage, audit |
-| `compliance` | Compliance checks | check, report, trace |
+| `git`         | Git operations         | commit, branch, merge, status  |
+| `planning`    | Planning & features    | feature, phase, epic           |
+| `deploy`      | Deployment             | build, deploy, release         |
+| `test`        | Testing                | run, coverage, audit           |
+| `compliance`  | Compliance checks      | check, report, trace           |
 
 ## Integration with Claude
 
@@ -183,9 +184,9 @@ Configure in `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "sc": {
+    "my-cli": {
       "command": "node",
-      "args": ["/path/to/supernal-code-package/bin/sc-mcp-server.js"]
+      "args": ["/path/to/your-project/bin/mcp-server.js"]
     }
   }
 }
@@ -200,7 +201,7 @@ Scopes can declare required states:
 ```typescript
 const deployScope: Scope = {
   id: 'deploy',
-  requiredStates: ['project-loaded', 'ci-configured']
+  requiredStates: ['project-loaded', 'ci-configured'],
 };
 ```
 

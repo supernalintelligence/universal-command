@@ -17,7 +17,7 @@ import { nodeRequire } from './nodeRequire';
 // The bare `require(...)` calls below are rewritten by esbuild to its built-in,
 // browser-safe `__require` shim (guards on `typeof require`), so they only run
 // server-side (CLI/API) and never emit a static `import 'module'`. This is the
-// proven fix for the recurring "Can't resolve 'module'" regression. See CLAUDE.md.
+// proven fix for the recurring "Can't resolve 'module'" regression. See nodeRequire.ts.
 import type { ExecutionContext } from './types';
 
 /**

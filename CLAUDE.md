@@ -1,8 +1,6 @@
 # Universal Command - Define Once, Deploy Everywhere
 
-> **Growth Gate:** Does this compound self-sustaining growth? If not, stop. See root CLAUDE.md.
-
-Core abstraction for the Supernal platform. Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.2.0, MIT, open source.
+Define a command once and auto-generate CLI (Commander.js), Next.js API routes, and MCP tool interfaces from a single schema. v0.2.0, MIT.
 
 ## Tech Stack
 
@@ -48,7 +46,6 @@ src/
     index.ts            # Semantic scope system for command grouping and progressive loading
   session-tenancy/
     index.ts            # Node-only session-to-company lock resolver, tenancy guard, execution scope
-  commands/             # Built-in commands (planning, workflow, agent, test)
 ```
 
 ## How to Define a Command
@@ -89,7 +86,7 @@ Every `UniversalCommand` emits four surfaces from one definition:
 | `toMCP()`     | MCP tool definition    | AI agents via MCP                   |
 | `toTool()`    | `{ config, handler }`  | UI ToolRegistry via `fromCommand()` |
 
-`toTool()` maps the schema to a `@supernal/interface`-compatible config and wraps `execute()` with `interface: 'api'`. Use `fromCommand(myCommand)` in supernal-interface code to register it. No transport added — direct function call. Full spec: `.supernal/docs/specs/platform/universal-tool-bridge.md`
+`toTool()` maps the schema to a `@supernal/interface`-compatible config and wraps `execute()` with `interface: 'api'`. Use `fromCommand(myCommand)` in `@supernal/interface` code to register it. No transport added — direct function call.
 
 ## Key Interfaces
 
@@ -115,27 +112,8 @@ Every `UniversalCommand` emits four surfaces from one definition:
 
 ## Important Rules
 
-- ALL new commands in the Supernal ecosystem MUST use UniversalCommand -- never raw Commander.js/Express/MCP
 - The handler function must work identically across all interfaces (CLI, API, MCP, test)
 - Do NOT import commander/next/@modelcontextprotocol at top level -- always lazy-load in methods
 - The `execute()` method validates args before calling handler -- do not skip validation
 - When adding a new entry point, update both `tsup.config.ts` (entry) and `package.json` (exports)
 - Use the generators module directly (`generate('next-routes', ...)`, `generate('mcp-server', ...)`) -- the old `generateNextRoutes`/`generateMCPServer` wrappers in codegen were removed as dead code (zero real callers)
-
----
-
-## Meta-Repo Context
-
-This package is a **git submodule** within the [supernal-coding](https://github.com/supernalintelligence/supernal-coding) monorepo. When working here, the parent repo's CLAUDE.md is NOT auto-loaded — you are in an isolated git root.
-
-**Cross-cutting tools available from the parent repo:**
-
-- `sc task create/list/done` — task management (tracks work across all packages)
-- `sc test` — test runner with requirement evidence logging
-- `si test` — interface testing, contract scanning
-- `@supernal/universal-command` — all new commands must use this pattern
-- `repotype validate` — repo structure validation
-
-**Parent docs:** See the root [CLAUDE.md](../../CLAUDE.md) and [/supernal/CLAUDE.md](../../../CLAUDE.md) for monorepo-wide conventions and the full sub-repo map.
-
-@~/.claude/skills/no-pr-direct-push.md
