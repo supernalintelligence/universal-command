@@ -148,8 +148,8 @@ export class CLIProgram {
     // Add hook for after command
     if (options.hooks?.afterCommand) {
       this.program.hook('postAction', async (thisCommand: any, actionCommand: any) => {
-        const commandName = actionCommand.name();
-        const context: ExecutionContext = {
+        const _commandName = actionCommand.name();
+        const _context: ExecutionContext = {
           interface: 'cli',
           globalOptions: this.program.opts(),
         };
