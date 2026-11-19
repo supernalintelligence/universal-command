@@ -1,6 +1,6 @@
 # Requirements
 
-This package uses the [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) workflow system for requirement tracking and test traceability.
+These are the package's requirements, written as Gherkin scenarios. Each file links to the tests that cover it.
 
 ## Requirement Summary
 
@@ -14,12 +14,6 @@ This package uses the [Supernal Coding](https://github.com/supernalintelligence/
 
 **Total: 93 tests across 5 requirements**
 
-## Upstream Reference
-
-This package implements the architecture defined in:
-
-- [Unified CLI-API-MCP Abstraction ADR](https://github.com/supernalintelligence/supernal-coding/blob/main/docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md)
-
 ## Workflow
 
 Requirements follow the Gherkin specification format:
@@ -27,5 +21,3 @@ Requirements follow the Gherkin specification format:
 - Each requirement has scenarios describing expected behavior
 - Tests are linked in the frontmatter (`tests:` field)
 - Status tracks implementation progress
-
-See [Supernal Coding documentation](https://supernal.ai/docs) for full workflow details.

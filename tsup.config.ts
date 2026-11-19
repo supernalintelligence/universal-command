@@ -13,6 +13,7 @@ export default defineConfig({
     'testing/index': 'src/testing/index.ts',
     'runtime/index': 'src/runtime/index.ts',
     'scopes/index': 'src/scopes/index.ts',
+    'session-tenancy/index': 'src/session-tenancy/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
@@ -20,5 +21,11 @@ export default defineConfig({
   clean: false,
   splitting: false,
   treeshake: true,
-  external: ['commander', 'next', 'next/server', '@modelcontextprotocol/sdk'],
+  external: [
+    'commander',
+    'next',
+    'next/server',
+    '@modelcontextprotocol/server',
+    '@modelcontextprotocol/node',
+  ],
 });

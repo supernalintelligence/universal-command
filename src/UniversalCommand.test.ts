@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { UniversalCommand } from './UniversalCommand';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { UniversalCommand, setTenancyGuard, getTenancyGuard } from './UniversalCommand';
 import { ValidationError } from './errors';
+import type { MCPCallExtra } from './types';
 
 describe('UniversalCommand', () => {
   describe('constructor', () => {
@@ -77,9 +78,7 @@ describe('UniversalCommand', () => {
         name: 'greet',
         description: 'Greet user',
         input: {
-          parameters: [
-            { name: 'name', type: 'string', required: true, description: 'Name' },
-          ],
+          parameters: [{ name: 'name', type: 'string', required: true, description: 'Name' }],
         },
         output: { type: 'text' },
         handler: async (args) => `Hello, ${args.name}!`,
@@ -93,9 +92,7 @@ describe('UniversalCommand', () => {
         name: 'greet',
         description: 'Greet user',
         input: {
-          parameters: [
-            { name: 'name', type: 'string', default: 'World', description: 'Name' },
-          ],
+          parameters: [{ name: 'name', type: 'string', default: 'World', description: 'Name' }],
         },
         output: { type: 'text' },
         handler: async (args) => `Hello, ${args.name}!`,
@@ -206,9 +203,7 @@ describe('UniversalCommand', () => {
         name: 'test',
         description: 'Test',
         input: {
-          parameters: [
-            { name: 'count', type: 'number', min: 1, max: 100, description: 'Count' },
-          ],
+          parameters: [{ name: 'count', type: 'number', min: 1, max: 100, description: 'Count' }],
         },
         output: { type: 'json' },
         handler: async () => ({}),
@@ -225,7 +220,12 @@ describe('UniversalCommand', () => {
         description: 'Test',
         input: {
           parameters: [
-            { name: 'email', type: 'string', pattern: '^[^@]+@[^@]+\\.[^@]+$', description: 'Email' },
+            {
+              name: 'email',
+              type: 'string',
+              pattern: '^[^@]+@[^@]+\\.[^@]+$',
+              description: 'Email',
+            },
           ],
         },
         output: { type: 'json' },
@@ -285,8 +285,20 @@ describe('UniversalCommand', () => {
         description: 'List all users',
         input: {
           parameters: [
-            { name: 'role', type: 'string', enum: ['admin', 'user'], description: 'Filter by role' },
-            { name: 'limit', type: 'number', default: 10, min: 1, max: 100, description: 'Max results' },
+            {
+              name: 'role',
+              type: 'string',
+              enum: ['admin', 'user'],
+              description: 'Filter by role',
+            },
+            {
+              name: 'limit',
+              type: 'number',
+              default: 10,
+              min: 1,
+              max: 100,
+              description: 'Max results',
+            },
           ],
         },
         output: { type: 'json' },
@@ -309,9 +321,7 @@ describe('UniversalCommand', () => {
         name: 'echo',
         description: 'Echo message',
         input: {
-          parameters: [
-            { name: 'message', type: 'string', required: true, description: 'Message' },
-          ],
+          parameters: [{ name: 'message', type: 'string', required: true, description: 'Message' }],
         },
         output: { type: 'text' },
         handler: async (args) => ({ echoed: args.message }),
@@ -323,5 +333,673 @@ describe('UniversalCommand', () => {
       expect(result.content[0].type).toBe('text');
       expect(JSON.parse(result.content[0].text)).toEqual({ echoed: 'hello' });
     });
+
+    it('passes extra.sessionId through to the handler as context.sessionId', async () => {
+      let receivedSessionId: string | undefined;
+      const cmd = new UniversalCommand({
+        name: 'session-echo',
+        description: 'Echo session id',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return { ok: true };
+        },
+      });
+
+      await cmd.toMCP().execute({}, { sessionId: 'session-123' });
+
+      expect(receivedSessionId).toBe('session-123');
+    });
+
+    it('does not set context.sessionId when extra is omitted', async () => {
+      let receivedSessionId: string | undefined = 'sentinel';
+      const cmd = new UniversalCommand({
+        name: 'session-echo-2',
+        description: 'Echo session id',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return { ok: true };
+        },
+      });
+
+      await cmd.toMCP().execute({});
+
+      expect(receivedSessionId).toBeUndefined();
+    });
+
+    describe('streaming (output.type: "stream")', () => {
+      function buildProgressExtra(): {
+        extra: MCPCallExtra;
+        notifications: Array<Record<string, unknown>>;
+      } {
+        const notifications: Array<Record<string, unknown>> = [];
+        const extra: MCPCallExtra = {
+          meta: { progressToken: 'tok-1' },
+          sendNotification: async (notification) => {
+            notifications.push(notification.params ?? {});
+          },
+        };
+        return { extra, notifications };
+      }
+
+      it('emits a real progress notification per chunk written to context.stream', async () => {
+        const cmd = new UniversalCommand({
+          name: 'stream-cmd',
+          description: 'Streams chunks',
+          input: { parameters: [] },
+          output: { type: 'stream' },
+          handler: async (_args, context) => {
+            context.stream!.write('chunk-one');
+            context.stream!.write('chunk-two');
+            return { done: true };
+          },
+        });
+
+        const { extra, notifications } = buildProgressExtra();
+        const result = await cmd.toMCP().execute({}, extra);
+
+        expect(notifications).toHaveLength(2);
+        expect(notifications[0]).toMatchObject({
+          progressToken: 'tok-1',
+          progress: 1,
+          message: 'chunk-one',
+        });
+        expect(notifications[1]).toMatchObject({
+          progressToken: 'tok-1',
+          progress: 2,
+          message: 'chunk-two',
+        });
+        // The final envelope is unaffected — still one JSON result, same as
+        // the non-streaming case.
+        expect(JSON.parse(result.content[0].text)).toEqual({ done: true });
+      });
+
+      it('provides a no-op context.stream (writable, but silent) when no progressToken is supplied', async () => {
+        let sawStream = false;
+        const cmd = new UniversalCommand({
+          name: 'stream-cmd-no-token',
+          description: 'Streams chunks',
+          input: { parameters: [] },
+          output: { type: 'stream' },
+          handler: async (_args, context) => {
+            sawStream = context.stream !== undefined;
+            // A streaming handler can always write unconditionally — no
+            // "if (context.stream)" guard needed even with no progress
+            // capability on this call.
+            context.stream!.write('ignored-chunk');
+            return { done: true };
+          },
+        });
+
+        // sendNotification present, but no progressToken in meta.
+        const sent = vi.fn(async () => {});
+        const result = await cmd.toMCP().execute({}, { sendNotification: sent });
+
+        expect(sawStream).toBe(true);
+        expect(sent).not.toHaveBeenCalled();
+        expect(JSON.parse(result.content[0].text)).toEqual({ done: true });
+      });
+
+      it('provides a no-op context.stream when the caller supplies no extra at all', async () => {
+        let sawStream = false;
+        const cmd = new UniversalCommand({
+          name: 'stream-cmd-no-extra',
+          description: 'Streams chunks',
+          input: { parameters: [] },
+          output: { type: 'stream' },
+          handler: async (_args, context) => {
+            sawStream = context.stream !== undefined;
+            context.stream!.write('ignored-chunk');
+            return { done: true };
+          },
+        });
+
+        const result = await cmd.toMCP().execute({});
+
+        expect(sawStream).toBe(true);
+        expect(JSON.parse(result.content[0].text)).toEqual({ done: true });
+      });
+
+      it('does not wire context.stream for a non-streaming command even with a full progress extra', async () => {
+        let sawStream = false;
+        const cmd = new UniversalCommand({
+          name: 'non-stream-cmd',
+          description: 'Not a streaming command',
+          input: { parameters: [] },
+          output: { type: 'json' },
+          handler: async (_args, context) => {
+            sawStream = context.stream !== undefined;
+            return { done: true };
+          },
+        });
+
+        const { extra, notifications } = buildProgressExtra();
+        const result = await cmd.toMCP().execute({}, extra);
+
+        expect(sawStream).toBe(false);
+        expect(notifications).toHaveLength(0);
+        expect(JSON.parse(result.content[0].text)).toEqual({ done: true });
+      });
+    });
+  });
+
+  describe('toCLI — session pass-through', () => {
+    const ORIGINAL_SESSION_ID = process.env.SC_SESSION_ID;
+
+    beforeEach(() => {
+      delete process.env.SC_SESSION_ID;
+    });
+
+    afterEach(() => {
+      if (ORIGINAL_SESSION_ID === undefined) {
+        delete process.env.SC_SESSION_ID;
+      } else {
+        process.env.SC_SESSION_ID = ORIGINAL_SESSION_ID;
+      }
+    });
+
+    it('sets context.sessionId from SC_SESSION_ID when set', async () => {
+      let receivedSessionId: string | undefined;
+      const cmd = new UniversalCommand({
+        name: 'cli-session-test',
+        description: 'Test CLI session pass-through',
+        input: { parameters: [] },
+        output: { type: 'text' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return 'done';
+        },
+      });
+
+      process.env.SC_SESSION_ID = 'cli-session-abc';
+      const cliCmd = cmd.toCLI();
+      await cliCmd.parseAsync(['node', 'cli-session-test'], { from: 'node' });
+
+      expect(receivedSessionId).toBe('cli-session-abc');
+    });
+
+    it('leaves context.sessionId undefined when SC_SESSION_ID is unset', async () => {
+      let receivedSessionId: string | undefined = 'sentinel';
+      const cmd = new UniversalCommand({
+        name: 'cli-session-test-2',
+        description: 'Test CLI session pass-through',
+        input: { parameters: [] },
+        output: { type: 'text' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return 'done';
+        },
+      });
+
+      const cliCmd = cmd.toCLI();
+      await cliCmd.parseAsync(['node', 'cli-session-test-2'], { from: 'node' });
+
+      expect(receivedSessionId).toBeUndefined();
+    });
+  });
+
+  describe('toCLI — cli.exitCode', () => {
+    const saved = process.exitCode;
+    afterEach(() => {
+      process.exitCode = saved;
+    });
+
+    function failingCmd(ok: boolean) {
+      return new UniversalCommand({
+        name: 'exit-code-test',
+        description: 'Returns a result the exitCode resolver maps',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        cli: { exitCode: (r: { ok: boolean }) => (r.ok ? 0 : 1), format: () => '' },
+        handler: async () => ({ ok }),
+      });
+    }
+
+    it('sets a non-zero process.exitCode when the resolver says the result failed', async () => {
+      process.exitCode = undefined;
+      await failingCmd(false).toCLI().parseAsync(['node', 'exit-code-test'], { from: 'node' });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('leaves process.exitCode alone for a successful result', async () => {
+      process.exitCode = undefined;
+      await failingCmd(true).toCLI().parseAsync(['node', 'exit-code-test'], { from: 'node' });
+      expect(process.exitCode).toBeUndefined();
+    });
+  });
+
+  describe('toNextAPI — session pass-through', () => {
+    it('sets context.sessionId from an x-session-id header (Headers-style request)', async () => {
+      let receivedSessionId: string | undefined;
+      const cmd = new UniversalCommand({
+        name: 'api-session-test',
+        description: 'Test API session pass-through',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI();
+      const headerMap = new Map([['x-session-id', 'api-session-xyz']]);
+      const fakeRequest = {
+        method: 'GET',
+        headers: { get: (key: string) => headerMap.get(key.toLowerCase()) ?? null },
+        nextUrl: { searchParams: new URLSearchParams() },
+      };
+
+      await route.GET!(fakeRequest as any);
+
+      expect(receivedSessionId).toBe('api-session-xyz');
+    });
+
+    it('leaves context.sessionId undefined when no session header is sent', async () => {
+      let receivedSessionId: string | undefined = 'sentinel';
+      const cmd = new UniversalCommand({
+        name: 'api-session-test-2',
+        description: 'Test API session pass-through',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: async (_args, context) => {
+          receivedSessionId = context.sessionId;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI();
+      const fakeRequest = {
+        method: 'GET',
+        headers: { get: () => null },
+        nextUrl: { searchParams: new URLSearchParams() },
+      };
+
+      await route.GET!(fakeRequest as any);
+
+      expect(receivedSessionId).toBeUndefined();
+    });
+
+    it('passes an in-process session store through as context.session when present on the request', async () => {
+      let receivedSession: unknown;
+      const cmd = new UniversalCommand({
+        name: 'api-session-test-3',
+        description: 'Test API session store pass-through',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: async (_args, context) => {
+          receivedSession = context.session;
+          return { ok: true };
+        },
+      });
+
+      const store = { get: vi.fn(), set: vi.fn() };
+      const route = cmd.toNextAPI();
+      const fakeRequest = {
+        method: 'GET',
+        headers: { get: () => null },
+        nextUrl: { searchParams: new URLSearchParams() },
+        session: store,
+      };
+
+      await route.GET!(fakeRequest as any);
+
+      expect(receivedSession).toBe(store);
+    });
+  });
+
+  describe('toNextAPI — next/server loading', () => {
+    const fakeRequest = {
+      method: 'GET',
+      headers: { get: () => null },
+      nextUrl: { searchParams: new URLSearchParams() },
+    };
+
+    // Re-import UniversalCommand with ./nextResponse mocked so the handler sees a chosen loader result.
+    async function routeWith(loaded: unknown, handler: () => Promise<unknown>) {
+      vi.resetModules();
+      vi.doMock('./nextResponse', () => ({ loadNextResponse: async () => loaded }));
+      const { UniversalCommand: UC } = await import('./UniversalCommand');
+      return new UC({
+        name: 'api-next-import',
+        description: 'Test next/server loading',
+        input: { parameters: [] },
+        output: { type: 'json' },
+        api: { method: 'GET' },
+        handler: handler as any,
+      }).toNextAPI().GET!;
+    }
+
+    afterEach(() => {
+      vi.doUnmock('./nextResponse');
+      vi.resetModules();
+    });
+
+    it('uses NextResponse.json on success when next/server loads', async () => {
+      const json = vi.fn(() => ({ mocked: true }));
+      const get = await routeWith({ json }, async () => ({ ok: 1 }));
+      const res: any = await get(fakeRequest as any);
+      expect(res.mocked).toBe(true);
+      expect(json).toHaveBeenCalledWith({ ok: 1 });
+    });
+
+    it('uses NextResponse.json with details and status on error when next/server loads', async () => {
+      const json = vi.fn((body: unknown, init?: { status?: number }) => ({
+        body,
+        status: init?.status,
+      }));
+      const get = await routeWith({ json }, async () => {
+        throw Object.assign(new Error('boom'), { details: { status: 418, why: 'tea' } });
+      });
+      const res: any = await get(fakeRequest as any);
+      expect(res.status).toBe(418);
+      expect(res.body).toEqual({ error: 'boom', details: { status: 418, why: 'tea' } });
+    });
+
+    it('returns a plain 200 JSON Response (not a NextResponse) when next/server is unavailable', async () => {
+      const { NextResponse } = await import('next/server');
+      const get = await routeWith(undefined, async () => ({ ok: 1 }));
+      const res = await get(fakeRequest as any);
+      expect(res).toBeInstanceOf(Response);
+      expect(res).not.toBeInstanceOf(NextResponse);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/json');
+      expect(await res.json()).toEqual({ ok: 1 });
+    });
+
+    it('returns a plain error Response including details when next/server is unavailable', async () => {
+      const { NextResponse } = await import('next/server');
+      const get = await routeWith(undefined, async () => {
+        throw Object.assign(new Error('boom'), { details: { status: 418, why: 'tea' } });
+      });
+      const res = await get(fakeRequest as any);
+      expect(res).not.toBeInstanceOf(NextResponse);
+      expect(res.status).toBe(418);
+      expect(await res.json()).toEqual({ error: 'boom', details: { status: 418, why: 'tea' } });
+    });
+  });
+
+  describe('toNextAPI — companyAuth (opt-in, injectable authCheck)', () => {
+    function fakePostRequest(body: unknown) {
+      return {
+        method: 'POST',
+        headers: { get: () => null },
+        nextUrl: { searchParams: new URLSearchParams() },
+        json: async () => body,
+      };
+    }
+
+    it('runs the handler unaffected when companyAuth is not declared, even with no authCheck', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'no-company-auth-test',
+        description: 'No companyAuth declared',
+        input: { parameters: [{ name: 'x', type: 'string', required: false }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI();
+      await route.POST!(fakePostRequest({ x: 'y' }) as any);
+
+      expect(handlerRan).toBe(true);
+    });
+
+    it('fails loud (never silently allows) when companyAuth is declared but no authCheck is supplied', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'missing-authcheck-test',
+        description: 'companyAuth declared, no authCheck wired',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI(); // no authCheck option
+      const response: any = await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(handlerRan).toBe(false);
+      expect(response.status).toBe(403);
+    });
+
+    it('returns the authCheck-supplied response verbatim and never runs the handler when unauthorized', async () => {
+      let handlerRan = false;
+      const cmd = new UniversalCommand({
+        name: 'auth-denied-test',
+        description: 'companyAuth declared, authCheck denies',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async () => {
+          handlerRan = true;
+          return { ok: true };
+        },
+      });
+
+      const deniedResponse = { marker: 'denied-response' };
+      const route = cmd.toNextAPI({
+        authCheck: async () => ({ authorized: false, response: deniedResponse }),
+      });
+      const response = await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(response).toBe(deniedResponse);
+      expect(handlerRan).toBe(false);
+    });
+
+    it('runs the handler and passes the resolved slug to authCheck when authorized', async () => {
+      let receivedCompanySlug: string | undefined;
+      const authCheckCalls: Array<string | undefined> = [];
+      const cmd = new UniversalCommand({
+        name: 'auth-allowed-test',
+        description: 'companyAuth declared, authCheck allows',
+        input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+        output: { type: 'json' },
+        api: { method: 'POST' },
+        companyAuth: { slugParam: 'companySlug' },
+        handler: async (args) => {
+          receivedCompanySlug = args.companySlug;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI({
+        authCheck: async (companySlug) => {
+          authCheckCalls.push(companySlug);
+          return { authorized: true };
+        },
+      });
+      await route.POST!(fakePostRequest({ companySlug: 'acme' }) as any);
+
+      expect(authCheckCalls).toEqual(['acme']);
+      expect(receivedCompanySlug).toBe('acme');
+    });
+
+    it('maps a dynamic route param to a differently-named input parameter via api.paramAliases', async () => {
+      let receivedArgs: any;
+      const cmd = new UniversalCommand({
+        name: 'param-alias-test',
+        description: 'route param [slug] maps to the oldSlug input parameter',
+        input: {
+          parameters: [
+            { name: 'oldSlug', type: 'string', required: true },
+            { name: 'newSlug', type: 'string', required: true },
+          ],
+        },
+        output: { type: 'json' },
+        api: { method: 'POST', paramAliases: { slug: 'oldSlug' } },
+        companyAuth: { slugParam: 'oldSlug' },
+        handler: async (args) => {
+          receivedArgs = args;
+          return { ok: true };
+        },
+      });
+
+      const route = cmd.toNextAPI({
+        authCheck: async () => ({ authorized: true }),
+      });
+      const fakeContext = { params: Promise.resolve({ slug: 'acme' }) };
+      await route.POST!(fakePostRequest({ newSlug: 'acme-2' }) as any, fakeContext);
+
+      expect(receivedArgs).toEqual({ oldSlug: 'acme', newSlug: 'acme-2' });
+    });
+  });
+});
+
+describe('tenancy guard (REQ-STC-101/102)', () => {
+  afterEach(() => {
+    setTenancyGuard(null);
+  });
+
+  it('runs no check when the command declares no tenancy schema, even with a guard registered', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: false, reason: 'should never be called' });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'no-tenancy',
+      description: 'No tenancy declared',
+      input: { parameters: [{ name: 'company', type: 'string', required: true }] },
+      output: { type: 'json' },
+      handler: async (args) => ({ company: args.company }),
+    });
+
+    const result = await cmd.execute({ company: 'acme' } as any, { interface: 'test' });
+    expect(result).toEqual({ company: 'acme' });
+    expect(guard).not.toHaveBeenCalled();
+  });
+
+  it('runs no check when the command declares tenancy but no guard is registered', async () => {
+    setTenancyGuard(null);
+    expect(getTenancyGuard()).toBeNull();
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-no-guard',
+      description: 'Tenancy declared, no host guard registered',
+      input: { parameters: [{ name: 'company', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'company' },
+      handler: async (args) => ({ company: args.company }),
+    });
+
+    const result = await cmd.execute({ company: 'acme' } as any, { interface: 'test' });
+    expect(result).toEqual({ company: 'acme' });
+  });
+
+  it('calls the guard with the resolved company param and allows on a positive decision', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: true });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-allow',
+      description: 'Tenancy check passes',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async (args) => ({ ok: true, companySlug: args.companySlug }),
+    });
+
+    const context = { interface: 'cli' as const, sessionId: 'sess-1' };
+    const result = await cmd.execute({ companySlug: 'acme' } as any, context);
+
+    expect(result).toEqual({ ok: true, companySlug: 'acme' });
+    expect(guard).toHaveBeenCalledWith('acme', context);
+  });
+
+  it('throws AuthorizationError and never invokes the handler on a negative decision', async () => {
+    setTenancyGuard(() => ({
+      allowed: false,
+      reason: "session locked to 'other-co', requested 'acme'",
+    }));
+
+    const handler = vi.fn().mockResolvedValue({ ok: true });
+    const cmd = new UniversalCommand({
+      name: 'tenancy-deny',
+      description: 'Tenancy check fails',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler,
+    });
+
+    await expect(cmd.execute({ companySlug: 'acme' } as any, { interface: 'cli' })).rejects.toThrow(
+      "session locked to 'other-co', requested 'acme'"
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic message when the guard omits a reason', async () => {
+    setTenancyGuard(() => ({ allowed: false }));
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-deny-no-reason',
+      description: 'Tenancy check fails with no reason',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async () => ({ ok: true }),
+    });
+
+    await expect(cmd.execute({ companySlug: 'acme' } as any, { interface: 'cli' })).rejects.toThrow(
+      /not authorized for company 'acme'/
+    );
+  });
+
+  it('supports an async guard function', async () => {
+    setTenancyGuard(async (company) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      return { allowed: company === 'allowed-co' };
+    });
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-async',
+      description: 'Async guard',
+      input: { parameters: [{ name: 'companySlug', type: 'string', required: true }] },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async () => ({ ok: true }),
+    });
+
+    await expect(
+      cmd.execute({ companySlug: 'allowed-co' } as any, { interface: 'cli' })
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      cmd.execute({ companySlug: 'blocked-co' } as any, { interface: 'cli' })
+    ).rejects.toThrow(/not authorized/);
+  });
+
+  it('runs the tenancy check for validated data even after default-fill (companyParam picked up post-validation)', async () => {
+    const guard = vi.fn().mockReturnValue({ allowed: true });
+    setTenancyGuard(guard);
+
+    const cmd = new UniversalCommand({
+      name: 'tenancy-default',
+      description: 'Default-filled company param',
+      input: {
+        parameters: [
+          { name: 'companySlug', type: 'string', required: false, default: 'default-co' },
+        ],
+      },
+      output: { type: 'json' },
+      tenancy: { companyParam: 'companySlug' },
+      handler: async (args) => ({ companySlug: args.companySlug }),
+    });
+
+    await cmd.execute({} as any, { interface: 'cli' });
+    expect(guard).toHaveBeenCalledWith('default-co', expect.anything());
   });
 });

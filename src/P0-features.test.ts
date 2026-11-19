@@ -170,6 +170,65 @@ describe('P0-2: Positional Arguments', () => {
     expect(registeredArgs[0].variadic).toBe(true);
   });
 
+  it('should collect a repeated array-type OPTION into an array, not overwrite with the last string', async () => {
+    // Regression for: toCLI() gave array-type option params no parseArg fn,
+    // so Commander's default "last value wins" behavior handed the handler a
+    // raw string (e.g. "b" from `--field a --field b`), and validateArgs's
+    // `Array.isArray(value)` check then always failed with "Invalid command
+    // arguments" — array-type OPTION params (not positional variadic, which
+    // already worked) were unusable from the CLI surface for every command
+    // in the fleet, not just this test's synthetic one.
+    let received: unknown;
+    const command = new UniversalCommand({
+      name: 'filter apply',
+      description: 'Apply repeated filters',
+      input: {
+        parameters: [
+          {
+            name: 'field',
+            type: 'array',
+            description: 'Repeatable filter',
+            required: false,
+          },
+        ],
+      },
+      output: { type: 'text' },
+      handler: async (args) => {
+        received = args.field;
+        return 'ok';
+      },
+    });
+
+    const cliCmd = command.toCLI();
+    await cliCmd.parseAsync(['node', 'filter-apply', '--field', 'a', '--field', 'b'], {
+      from: 'node',
+    });
+
+    expect(received).toEqual(['a', 'b']);
+  });
+
+  it('should parse an object-type OPTION from its JSON string', async () => {
+    let received: unknown;
+    const command = new UniversalCommand({
+      name: 'thing send',
+      description: 'Send a thing',
+      input: {
+        parameters: [{ name: 'primary', type: 'object', description: 'Action', required: true }],
+      },
+      output: { type: 'text' },
+      handler: async (args) => {
+        received = args.primary;
+        return 'ok';
+      },
+    });
+    await command
+      .toCLI()
+      .parseAsync(['node', 'thing-send', '--primary', '{"id":"open","label":"Open"}'], {
+        from: 'node',
+      });
+    expect(received).toEqual({ id: 'open', label: 'Open' });
+  });
+
   it('should mix positional and option parameters', () => {
     const command = new UniversalCommand({
       name: 'copy',

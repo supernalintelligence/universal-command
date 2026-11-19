@@ -233,7 +233,7 @@ describe('P1-8: Global Options and Hooks', () => {
       // Test captures context through handler
 
       const hooks: CLIHooks = {
-        beforeCommand: async (commandName, args, _context) => {
+        beforeCommand: async (_commandName, _args, _context) => {
           capturedContext = context;
         },
       };

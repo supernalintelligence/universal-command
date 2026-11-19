@@ -7,11 +7,17 @@
  * - Nested command registration
  */
 
-import { createRequire } from 'node:module';
 import { UniversalCommand } from './UniversalCommand';
+import { nodeRequire } from './nodeRequire';
 
-// Create a require function that works in both ESM and CJS contexts
-const require = createRequire(import.meta.url);
+// NOTE: do NOT `import { createRequire } from 'node:module'` at module top level.
+// tsup/esbuild hoists that into a top-level `import 'module'` in the ESM bundle,
+// which is Node-only and breaks the browser/client bundle the moment a client
+// component pulls in the dashboard SDK barrel (which value-imports these classes).
+// The bare `require(...)` calls below are rewritten by esbuild to its built-in,
+// browser-safe `__require` shim (guards on `typeof require`), so they only run
+// server-side (CLI/API) and never emit a static `import 'module'`. This is the
+// proven fix for the recurring "Can't resolve 'module'" regression. See nodeRequire.ts.
 import type { ExecutionContext } from './types';
 
 /**
@@ -105,7 +111,7 @@ export class CLIProgram {
     // Lazy load commander
     let Command: any;
     try {
-      Command = require('commander').Command;
+      Command = nodeRequire('commander').Command;
     } catch {
       throw new Error(
         'commander package is required for CLI generation. Install with: npm install commander'
@@ -142,8 +148,8 @@ export class CLIProgram {
     // Add hook for after command
     if (options.hooks?.afterCommand) {
       this.program.hook('postAction', async (thisCommand: any, actionCommand: any) => {
-        const commandName = actionCommand.name();
-        const context: ExecutionContext = {
+        const _commandName = actionCommand.name();
+        const _context: ExecutionContext = {
           interface: 'cli',
           globalOptions: this.program.opts(),
         };
@@ -211,6 +217,7 @@ export class CLIProgram {
     return async (...args: any[]) => {
       const context: ExecutionContext = {
         interface: 'cli',
+        projectRoot: process.cwd(), // invocation dir; commands resolve workspace-relative paths from this
         globalOptions: this.program.opts(), // Include global options
       };
 

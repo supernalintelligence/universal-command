@@ -4,7 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
 [![npm downloads](https://img.shields.io/npm/dm/@supernal/universal-command.svg)](https://www.npmjs.com/package/@supernal/universal-command)
-[![Tests](https://img.shields.io/badge/tests-93%20passing-brightgreen.svg)](https://github.com/supernalintelligence/universal-command/actions)
+[![CI](https://github.com/supernalintelligence/universal-command/actions/workflows/ci.yml/badge.svg)](https://github.com/supernalintelligence/universal-command/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-blue.svg)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -24,7 +24,7 @@ Building tools for the AI age means maintaining **three separate implementations
 
 - **CLI** — Commander.js schema + handler + output formatting
 - **API** — Next.js/Express schema + handler + auth + caching
-- **MCP** — `@modelcontextprotocol/sdk` schema + handler + capabilities
+- **MCP** — `@modelcontextprotocol/server` schema + handler + capabilities
 
 That's 3× the code, 3× the tests, and inevitable drift between interfaces.
 
@@ -93,12 +93,11 @@ With Universal Command, adding MCP support to an existing CLI takes **one line**
 npm install @supernal/universal-command
 ```
 
-Install peer dependencies for the interfaces you need:
+Install peer dependencies for the interfaces you need. The MCP interface needs no extra install: `@modelcontextprotocol/server` and `@modelcontextprotocol/node` are regular dependencies of this package (Node 20 or newer).
 
 ```bash
 npm install commander                    # CLI
 npm install next                         # Next.js API
-npm install @modelcontextprotocol/sdk    # MCP
 ```
 
 ---
@@ -176,10 +175,13 @@ $ curl -X POST /api/issues/create \
 
 ```typescript
 // mcp-server.ts
-import { Server } from '@modelcontextprotocol/sdk/server';
+import { Server } from '@modelcontextprotocol/server';
 import { issueCreate } from './commands/issue-create';
 
-const server = new Server({ name: 'my-mcp-server' });
+const server = new Server(
+  { name: 'my-mcp-server', version: '1.0.0' },
+  { capabilities: { tools: {} } }
+);
 
 server.setRequestHandler('tools/list', async () => ({
   tools: [issueCreate.toMCP()],
@@ -191,6 +193,8 @@ server.setRequestHandler('tools/call', async (request) => {
   }
 });
 ```
+
+`createMCPHttpApp` (from `@supernal/universal-command/mcp`) serves the registry over HTTP. Its default, `protocolEra: 'legacy'`, answers 2025-era clients in JSON. With `protocolEra: 'both'` it also serves the 2026-07-28 era, and it answers 2025-era clients with an event stream (`text/event-stream`) instead of JSON. A caller that reads only a JSON body, such as a bare `fetch(...).json()`, breaks when you switch modes; parse the `data:` lines or use an MCP client. In `'both'` mode, call the returned `close()` when you listen on `app` yourself. Only `POST /mcp` is routed, so a `GET` or `DELETE` on `/mcp` returns Express's 404, not a protocol error.
 
 ---
 
@@ -464,7 +468,7 @@ interface ExecutionContext {
 
 | Version  | Status     | Features                                   |
 | -------- | ---------- | ------------------------------------------ |
-| **v1.0** | ✅ Current | CLI, Next.js API, MCP, TypeScript          |
+| **v0.2** | ✅ Current | CLI, Next.js API, MCP, TypeScript          |
 | **v1.1** | 🔄 Planned | Express.js, streaming, auto-generated docs |
 | **v2.0** | 📋 Future  | Hono, gRPC, GraphQL                        |
 
@@ -474,7 +478,7 @@ interface ExecutionContext {
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-This project uses [Supernal Coding](https://github.com/supernalintelligence/supernal-coding) for requirement tracking. Pre-commit hooks run lint, type-check, and all 93 tests automatically.
+Run `pnpm run type-check`, `pnpm run lint` and `pnpm run test:ci` before you open a pull request.
 
 ---
 

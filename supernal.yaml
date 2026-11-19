@@ -7,11 +7,6 @@ package:
   type: standalone
   license: MIT
 
-# Reference to parent monorepo (for full requirement context)
-upstream:
-  repo: https://github.com/supernalintelligence/supernal-coding
-  docs_path: docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
-
 # Local requirements (self-contained in this package)
 requirements:
   prefix: REQ-UC
@@ -25,6 +20,8 @@ testing:
 
 # Git hooks
 git_hooks:
+  # core.hooksPath this repo runs (husky 9). The task-session gate checks it.
+  hooks_path: .husky/_
   pre_commit:
     checks:
       lint_staged:
@@ -74,3 +71,8 @@ director:
 
 claude_hooks:
   parent_repo: ../..
+
+git_sync:
+  dev_branch: ian-dev
+  protected_branches:
+    - main
