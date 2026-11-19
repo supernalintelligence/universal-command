@@ -1,11 +1,10 @@
-# repotype.yaml — universal-command
-# Run: repotype validate .
+# repotype.yaml for universal-command
+# Run: pnpm run repo:lint   (repotype validate .)
+# Keeps the repository tidy: a fixed root layout, no build output or internal
+# files committed, and the documents a published package needs.
 version: '1'
-extends: '../../packages/repotype/profiles/supernal/repotype.yaml'
 
 defaults:
-  inheritance: merge
-  strictness: balanced
   unmatchedFiles: deny
 
 ignore:
@@ -18,50 +17,78 @@ ignore:
 folders:
   - id: package-root
     path: .
+    requiredFiles:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - package.json
+    requiredFolders:
+      - src
+      - docs
     allowedFolders:
       - src
-      - dist
-      - tests
       - docs
-      - bin
-      - scripts
       - examples
-      - profiles
-      - schemas
-      - __tests__
-      - __mocks__
-      - .turbo
+      - scripts
+      - .git
+      - .github
+      - .husky
+      - .supernal
 
 files:
-  - id: package-json
-    glob: package.json
+  - id: root-configs
+    glob: '*.{json,yaml,yml,ts,js}'
 
-  - id: tsconfig
-    glob: tsconfig.json
+  - id: root-docs
+    glob: '{README,CHANGELOG,CONTRIBUTING,CLAUDE}.md'
 
-  - id: readme
-    glob: README.md
+  - id: license-file
+    glob: LICENSE
 
-  - id: claude-md
-    glob: CLAUDE.md
+  - id: root-dotfiles
+    glob: '.{gitignore,mailmap,prettierrc}'
+
+  - id: pnpm-lock
+    glob: pnpm-lock.yaml
 
   - id: source-files
     glob: 'src/**/*'
-
-  - id: test-files
-    glob: '{tests,__tests__}/**/*'
-
-  - id: dist-files
-    glob: 'dist/**/*'
-
-  - id: bin-files
-    glob: 'bin/**/*'
-
-  - id: script-files
-    glob: 'scripts/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Source tree is recursive by design.'
 
   - id: doc-files
     glob: 'docs/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Documentation tree is recursive by design.'
 
   - id: example-files
     glob: 'examples/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Examples are recursive by design.'
+
+  - id: script-files
+    glob: 'scripts/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Helper scripts.'
+
+  - id: github-files
+    glob: '.github/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Workflows and templates.'
+
+  - id: husky-files
+    glob: '.husky/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Git hooks.'
+
+  - id: supernal-files
+    glob: '.supernal/**/*'
+    lint:
+      allowOverbroad: true
+      reason: 'Requirement records.'

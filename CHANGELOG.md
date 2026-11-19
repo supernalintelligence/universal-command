@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+### Added
+
+- Repotype checks the repository layout (`repotype.yaml`, `pnpm run repo:lint`, and a CI step), so stray root files, committed build output and missing release documents fail the build.
+
 ### Changed
 
 - Removed the unused `zod` ^3 dependency. No source file imports it, and the MCP packages bring their own `zod` 4.
