@@ -26,6 +26,23 @@ describe('toMCP policy metadata', () => {
     expect(command('bad', { access: 'readonly' }).toMCP()._meta).toBeUndefined();
   });
 
+  it.each([
+    ['danger critical', { access: 'write', danger: 'critical' }],
+    ['danger upper case', { access: 'write', danger: 'HIGH' }],
+    ['danger number', { access: 'read', danger: 5 }],
+    ['approval string', { access: 'write', approval: 'true' }],
+    ['approval number', { access: 'write', approval: 1 }],
+    ['capability array', { access: 'write', requiredCapability: ['board:write'] }],
+    ['capability empty', { access: 'write', requiredCapability: '' }],
+  ])(
+    'a present but invalid value (%s) declares nothing, so the gateway fails closed',
+    (_label, mcp) => {
+      const tool = command('invalid', mcp).toMCP();
+      expect(tool._meta).toBeUndefined();
+      expect(tool.annotations).toBeUndefined();
+    }
+  );
+
   it('a low danger read maps to a read only hint and a policy entry', () => {
     const tool = command('r', { access: 'read' }).toMCP();
     expect(tool.annotations).toEqual({ readOnlyHint: true, destructiveHint: false });

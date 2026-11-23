@@ -1052,6 +1052,20 @@ export class UniversalCommand<TInput = any, TOutput = any> {
   private mcpPolicyFields(): Pick<MCPToolDefinition, 'annotations' | '_meta'> {
     const mcp = this.schema.mcp;
     if (mcp?.access !== 'read' && mcp?.access !== 'write') return {};
+    // A present but invalid value declares nothing, so the gateway treats the tool as a high danger write.
+    if (
+      mcp.danger !== undefined &&
+      mcp.danger !== 'low' &&
+      mcp.danger !== 'medium' &&
+      mcp.danger !== 'high'
+    )
+      return {};
+    if (mcp.approval !== undefined && typeof mcp.approval !== 'boolean') return {};
+    if (
+      mcp.requiredCapability !== undefined &&
+      (typeof mcp.requiredCapability !== 'string' || mcp.requiredCapability === '')
+    )
+      return {};
     const danger = mcp.danger ?? (mcp.access === 'read' ? 'low' : 'medium');
     return {
       annotations: {
