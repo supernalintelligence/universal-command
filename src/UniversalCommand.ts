@@ -896,6 +896,7 @@ export class UniversalCommand<TInput = any, TOutput = any> {
       name: toolName,
       description: this.schema.description,
       inputSchema: this.parametersToJSONSchema(),
+      ...this.mcpPolicyFields(),
       execute: async (args: any, extra?: MCPCallExtra) => {
         try {
           const context: ExecutionContext = { interface: 'mcp', mcpToolName: toolName };
@@ -1043,6 +1044,27 @@ export class UniversalCommand<TInput = any, TOutput = any> {
             isError: true,
           };
         }
+      },
+    };
+  }
+
+  /** Tool hints and the `supernal/policy` entry, only when the command declares `mcp.access`. */
+  private mcpPolicyFields(): Pick<MCPToolDefinition, 'annotations' | '_meta'> {
+    const mcp = this.schema.mcp;
+    if (mcp?.access !== 'read' && mcp?.access !== 'write') return {};
+    const danger = mcp.danger ?? (mcp.access === 'read' ? 'low' : 'medium');
+    return {
+      annotations: {
+        readOnlyHint: mcp.access === 'read',
+        destructiveHint: mcp.access === 'write' && danger === 'high',
+      },
+      _meta: {
+        'supernal/policy': {
+          access: mcp.access,
+          danger,
+          approval: mcp.approval === true,
+          ...(mcp.requiredCapability ? { requiredCapability: mcp.requiredCapability } : {}),
+        },
       },
     };
   }

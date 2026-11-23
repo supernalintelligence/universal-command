@@ -277,6 +277,18 @@ export interface MCPOptions {
    * declared here — this closes that pre-existing type gap, no behavior change.
    */
   hints?: string[];
+
+  /**
+   * Access policy the company gateway enforces on every call. A command that
+   * declares none is treated as a high danger write, so only a company_admin
+   * session may call it.
+   */
+  access?: 'read' | 'write';
+  danger?: 'low' | 'medium' | 'high';
+  /** The RBAC capability the caller must hold (for example board:write). */
+  requiredCapability?: string;
+  /** True makes the call need company_admin until a real approval flow exists. */
+  approval?: boolean;
 }
 
 /**
@@ -504,6 +516,10 @@ export interface MCPToolDefinition {
   name: string;
   description: string;
   inputSchema: any; // JSONSchema
+  /** MCP tool hints, present only when the command declares `mcp.access`. */
+  annotations?: { readOnlyHint: boolean; destructiveHint: boolean };
+  /** Carries the `supernal/policy` entry the company gateway reads. */
+  _meta?: Record<string, unknown>;
   execute: (
     args: any,
     /**

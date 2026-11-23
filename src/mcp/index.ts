@@ -159,7 +159,13 @@ export async function createMCPServer(
   server.setRequestHandler('tools/list', async () => ({
     tools: registry.getAll().map((cmd) => {
       const t = cmd.toMCP();
-      return { name: t.name, description: t.description, inputSchema: t.inputSchema };
+      return {
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        ...(t.annotations ? { annotations: t.annotations } : {}),
+        ...(t._meta ? { _meta: t._meta } : {}),
+      };
     }),
     // _meta is the standard MCP extension point for out-of-band info; harmless
     // for clients that ignore it, useful for anything that reads it
