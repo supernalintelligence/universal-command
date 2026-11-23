@@ -384,9 +384,7 @@ export interface CommandSchema<TInput = any, TOutput = any> {
   mcp?: MCPOptions;
 
   /**
-   * Session-to-company tenancy lock (REQ-STC-101/102,
-   * .supernal/docs/specs/platform/2026-09-02-session-to-company-tenancy-implementation.md
-   * §4). Opt-in: only a command that declares this gets the check. `companyParam`
+   * Session-to-company tenancy lock (REQ-STC-101/102). Opt-in: only a command that declares this gets the check. `companyParam`
    * names the validated input parameter (e.g. 'company', 'companySlug') carrying
    * the requested company. execute() calls the guard registered via
    * setTenancyGuard() with that value before invoking the handler; a
@@ -398,8 +396,8 @@ export interface CommandSchema<TInput = any, TOutput = any> {
    * (`setTenancyGuard()`). It has a NAMED, bounded gap for real browser
    * traffic: a request that never sends `x-session-id` (i.e. essentially
    * every real end-user browser request) resolves to "platform tier" —
-   * unrestricted — by design (see supernal-code-package's
-   * `session-tenancy-guard.ts`). It does not authenticate a real end user at
+   * unrestricted — by design (the host's session guard
+   * decides). It does not authenticate a real end user at
    * all. Never rely on `tenancy` alone to authorize an HTTP mutation a real
    * logged-in user's browser can reach — use `companyAuth` for that.
    */
@@ -423,9 +421,8 @@ export interface CommandSchema<TInput = any, TOutput = any> {
    * `authCheck` supplied FAILS LOUD (throws `AuthorizationError`, HTTP 403) —
    * it never silently allows the request through.
    *
-   * See supernal-code-package/CLAUDE.md's "Company-scoped HTTP auth for
-   * `.toNextAPI()`" section (next to the mandatory UniversalCommand rule)
-   * for the full before/after pattern this replaces.
+   * Supply `authCheck` to `toNextAPI()` so every company-scoped command is
+   * authorized per request.
    */
   companyAuth?: {
     /** Input parameter (post `paramAliases` mapping) naming the target company slug. */

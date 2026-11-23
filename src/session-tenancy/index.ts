@@ -1,8 +1,8 @@
 /**
  * Session-to-company tenancy resolution (REQ-STC-101/102), Node-only.
  *
- * Shared home for the logic that supernal-code-package/src/cli/utils/session-tenancy-guard.ts
- * and packages/modules/lib/session-tenancy-guard.ts carry as copies. Kept out of the main
+ * Shared home for the session-tenancy logic that host applications would
+ * otherwise each carry as a copy. Kept out of the main
  * barrel because it uses node:fs and node:async_hooks.
  *
  * This entry is bundled on its own (tsup, no splitting), so it must not import runtime
@@ -142,7 +142,7 @@ export function resolveCompanyLockFor(
   // envIsTrusted is passed only by resolveRequestCompanyLock, the dashboard server's api interface: the server's
   // own SUPERNAL_COMPANY_SLUG is set by whoever starts the server, never by a caller of one request, so it is the
   // lock (the single-company desktop build). Everywhere else the session record decides. Same rule and flag
-  // name as supernal-code-package/src/cli/utils/session-tenancy-guard.ts.
+  // name as the host CLI's session guard.
   if (opts.envIsTrusted && spawnedCompanySlug) {
     return { tier: 'locked', companySlug: spawnedCompanySlug, ...idField(spawnedId) };
   }
@@ -154,7 +154,7 @@ export function resolveCompanyLockFor(
     return { tier: 'platform', companySlug: null };
   }
   // A session id: the record decides. The environment can only agree with it (or narrow a platform record),
-  // never override it. Same rule as supernal-code-package/src/cli/utils/session-tenancy-guard.ts.
+  // never override it. Same rule as the host CLI's session guard.
   const entry = readSessionMapEntry(sessionId);
   if (!entry) {
     return {

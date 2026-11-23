@@ -24,7 +24,7 @@ import { loadNextResponse } from './nextResponse';
  * `setTenancyGuard()` at startup; `execute()` calls it for any command whose
  * schema declares `tenancy.companyParam`. Deliberately host-agnostic — this
  * package has no dependency on how session identity is actually resolved
- * (that lives in supernal-code-package / the dashboard), only on the shape
+ * (that lives in the host application), only on the shape
  * of the decision. Returning `undefined`/never calling `setTenancyGuard()`
  * means no check runs at all (today's behavior, zero regression for a host
  * that never registers one — e.g. a test harness or a standalone consumer

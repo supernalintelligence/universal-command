@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Universal Command! This document 
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - pnpm (recommended) or npm
 
 ### Development Setup
@@ -62,7 +62,7 @@ pnpm lint
 
 - We use [Prettier](https://prettier.io/) for code formatting
 - We use [ESLint](https://eslint.org/) for linting
-- Pre-commit hooks automatically format and lint staged files
+- Pre-commit hooks automatically format and lint staged files. They are installed only when the Supernal `sc` CLI is on your PATH, so a plain clone has no hooks: run `pnpm run lint` and `pnpm run type-check` yourself.
 
 ### Commit Messages
 
@@ -95,7 +95,7 @@ pnpm test
 pnpm test -- --watch
 
 # Run specific test file
-pnpm test -- src/core/UniversalCommand.test.ts
+pnpm test -- src/UniversalCommand.test.ts
 
 # Run with coverage
 pnpm test -- --coverage
@@ -112,11 +112,13 @@ pnpm test -- --coverage
 
 ```
 src/
-├── core/           # Core UniversalCommand and CommandRegistry
-├── generators/     # Interface generators (CLI, API, MCP)
+├── UniversalCommand.ts, CommandRegistry.ts, CLIProgram.ts   # Core classes
+├── generators/     # Interface generators (Next.js routes, MCP server)
 ├── codegen/        # Code generation utilities
+├── mcp/            # MCP server from a registry
 ├── runtime/        # Runtime server implementation
 ├── scopes/         # Scope management
+├── session-tenancy/ # Session to company lock helpers (Node only)
 ├── testing/        # Testing utilities
 └── index.ts        # Public API exports
 ```
@@ -163,4 +165,3 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 - Open a [GitHub Issue](https://github.com/supernalintelligence/universal-command/issues)
 - Email: support@supernal.ai
-- Discord: [discord.gg/supernal](https://discord.gg/supernal)

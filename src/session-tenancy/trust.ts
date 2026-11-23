@@ -1,6 +1,6 @@
 /**
  * The trust rules for session records and agent detection that every copy of the session-tenancy
- * check must apply the same way. supernal-code-package/src/cli/utils/agent-context.ts is the sc copy
+ * check must apply the same way. the host CLI keeps its own copy
  * (it cannot import this package's Node-only entry), and the rules here mirror it:
  *
  *  - A record counts only when it is a regular file (no symlink) owned by this user that no other user

@@ -7,6 +7,7 @@ When exposing tools to AI via MCP or other interfaces, we face a fundamental cha
 **All tools are not always relevant.**
 
 An AI assistant doesn't need access to "delete production database" when the user is just editing a README. Having too many tools:
+
 1. Increases token usage (tool descriptions consume context)
 2. Confuses the AI (more choices = worse decisions)
 3. Creates safety risks (irrelevant dangerous tools available)
@@ -22,17 +23,20 @@ publishPost() { }  // Only available on blog pages
 ```
 
 **How it works:**
+
 - Decorator registers scope metadata
 - At runtime, `LocationContext.getCurrent()` returns current page/route
 - MCP server filters tools: `ToolRegistry.getToolsGroupedByContainerForLocation()`
 - Only matching tools exposed to AI
 
 **Pros:**
+
 - Dynamic: Scope evaluated at request time
 - Works with SPA navigation
 - No code generation needed
 
 **Cons:**
+
 - Requires runtime context tracking
 - Scope definitions scattered in code
 - No static analysis possible
@@ -149,7 +153,7 @@ State represents the current context in which tools operate:
 ```typescript
 // All tools always available
 server.setRequestHandler('tools/list', async () => {
-  return { tools: registry.getAll().map(t => t.toMCP()) };
+  return { tools: registry.getAll().map((t) => t.toMCP()) };
 });
 ```
 
@@ -162,10 +166,8 @@ server.setRequestHandler('tools/list', async () => {
 // Filter by current state
 server.setRequestHandler('tools/list', async () => {
   const state = await getApplicationState();
-  const tools = registry.getAll().filter(t =>
-    isToolAvailableInState(t, state)
-  );
-  return { tools: tools.map(t => t.toMCP()) };
+  const tools = registry.getAll().filter((t) => isToolAvailableInState(t, state));
+  return { tools: tools.map((t) => t.toMCP()) };
 });
 ```
 
@@ -229,37 +231,37 @@ tools/list { scope: 'project' }
 
 ## Comparison Matrix
 
-| Strategy | Token Usage | Safety | Complexity | Dynamic | Standard MCP |
-|----------|-------------|--------|------------|---------|--------------|
-| Flat List | High | Low | Low | No | Yes |
-| State-Based | Medium | High | Medium | Yes | Yes |
-| Namespaces | Low | Medium | High | No | Partial |
-| Context Rooms | Low | High | Medium | Yes | Via Resources |
-| Capability Manifests | Low | High | Medium | Yes | No |
+| Strategy             | Token Usage | Safety | Complexity | Dynamic | Standard MCP  |
+| -------------------- | ----------- | ------ | ---------- | ------- | ------------- |
+| Flat List            | High        | Low    | Low        | No      | Yes           |
+| State-Based          | Medium      | High   | Medium     | Yes     | Yes           |
+| Namespaces           | Low         | Medium | High       | No      | Partial       |
+| Context Rooms        | Low         | High   | Medium     | Yes     | Via Resources |
+| Capability Manifests | Low         | High   | Medium     | Yes     | No            |
 
 ## Recommended Approach
 
-### For SC: Hybrid State + Namespace
+### For a CLI with many commands: Hybrid State + Namespace
 
 ```typescript
 // 1. Define state-aware tool registry
 const toolRegistry = new StateAwareRegistry({
   states: {
     'project-loaded': {
-      description: 'A supernal project is loaded',
-      detector: () => fs.existsSync('supernal.yaml')
+      description: 'A project is loaded',
+      detector: () => fs.existsSync('project.yaml'),
     },
     'git-initialized': {
       description: 'Git repository exists',
-      detector: () => fs.existsSync('.git')
-    }
-  }
+      detector: () => fs.existsSync('.git'),
+    },
+  },
 });
 
 // 2. Register tools with state requirements
 toolRegistry.register(requirementList, {
   requiredStates: ['project-loaded'],
-  namespace: 'requirement'
+  namespace: 'requirement',
 });
 
 // 3. MCP server uses current state
@@ -278,7 +280,7 @@ server.setRequestHandler('tools/list', async () => {
 // State detector registry
 const stateDetectors: Record<string, () => Promise<boolean>> = {
   'project-loaded': async () => {
-    return fs.existsSync(path.join(process.cwd(), 'supernal.yaml'));
+    return fs.existsSync(path.join(process.cwd(), 'project.yaml'));
   },
   'git-initialized': async () => {
     return fs.existsSync(path.join(process.cwd(), '.git'));
@@ -289,7 +291,7 @@ const stateDetectors: Record<string, () => Promise<boolean>> = {
   },
   'ci-configured': async () => {
     return fs.existsSync('.github/workflows') || fs.existsSync('.gitlab-ci.yml');
-  }
+  },
 };
 
 // Detect current states
@@ -307,21 +309,25 @@ async function detectCurrentStates(): Promise<string[]> {
 ## Implementation Plan
 
 ### Phase 1: State Detection
+
 - [ ] Add state detector interface to universal-command
 - [ ] Implement common detectors (project, git, etc.)
 - [ ] Add `requiredStates` to CommandSchema
 
 ### Phase 2: Scoped MCP
+
 - [ ] Modify RuntimeServer.startMCP to filter by state
 - [ ] Add state refresh mechanism (on file changes, etc.)
 - [ ] Test with Claude Desktop
 
 ### Phase 3: Code Generation
+
 - [ ] Add state metadata to generated code
 - [ ] Create "names" tree generator
 - [ ] Add scope labeling workflow
 
 ### Phase 4: Integration with @supernal/interface
+
 - [ ] Map LocationScope to state model
 - [ ] Unified scope definitions
 - [ ] Shared state detection
@@ -380,6 +386,7 @@ server = MCPServerStdio(
 ```
 
 **Key insight:** `ToolFilterContext` exposes:
+
 - `run_context` - the current execution context
 - `agent` - which agent is requesting tools
 - `server_name` - which MCP server
@@ -393,17 +400,18 @@ This is exactly the pattern we need - filtering happens at the HOST level, not s
 ```typescript
 // Reduces 1000+ tools to relevant 10-20 using embeddings
 const filter = new MCPToolFilter({
-  embeddingModel: 'local'  // or 'openai', 'voyage'
+  embeddingModel: 'local', // or 'openai', 'voyage'
 });
 
 const relevantTools = await filter.filter(
   allTools,
-  userQuery,  // "I want to read a file"
+  userQuery, // "I want to read a file"
   { topK: 10, threshold: 0.7 }
 );
 ```
 
 **How it works:**
+
 1. Embed tool descriptions into vectors
 2. Embed user query
 3. Cosine similarity to find relevant tools
@@ -425,12 +433,12 @@ The [MCP spec](https://modelcontextprotocol.io/specification/2025-11-25) itself 
 
 ### Known Patterns
 
-| Pattern | Source | How It Works |
-|---------|--------|--------------|
-| `when` clauses | VS Code | Declarative conditions for command availability |
-| RBAC | Kubernetes | Role-based access to resources |
-| Feature Flags | LaunchDarkly | Targeting rules for feature exposure |
-| Scopes | OAuth 2.0 | Token-level permission boundaries |
+| Pattern        | Source       | How It Works                                    |
+| -------------- | ------------ | ----------------------------------------------- |
+| `when` clauses | VS Code      | Declarative conditions for command availability |
+| RBAC           | Kubernetes   | Role-based access to resources                  |
+| Feature Flags  | LaunchDarkly | Targeting rules for feature exposure            |
+| Scopes         | OAuth 2.0    | Token-level permission boundaries               |
 
 ### Synthesis
 
@@ -440,7 +448,7 @@ There are three complementary approaches:
 2. **State-Based Filtering** (our approach) - Dynamic, context-aware
 3. **Semantic Filtering** (embeddings) - AI-driven, query-aware
 
-For SC, we should implement **State-Based Filtering** with optional **Static Filtering** as override.
+For a CLI with many commands, we should implement **State-Based Filtering** with optional **Static Filtering** as override.
 Semantic filtering is overkill for our tool count but interesting for large tool ecosystems.
 
 ## Conclusion
@@ -452,6 +460,7 @@ The state-aware scoping problem is real and important. The recommended approach:
 3. **Long-term**: Contribute scope semantics to MCP specification
 
 This bridges the gap between:
+
 - **universal-command** (command definitions)
 - **@supernal/interface** (runtime scoping)
 - **MCP protocol** (AI tool discovery)

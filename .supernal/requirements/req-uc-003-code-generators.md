@@ -4,7 +4,6 @@ title: Code Generators for CLI, API, MCP, OpenAPI
 status: Done
 priority: High
 category: generators
-upstream_ref: https://github.com/supernalintelligence/supernal-coding/blob/main/docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
 tests:
   - src/generators/index.test.ts
 created: '2026-01-09'

@@ -4,7 +4,6 @@ title: Scope Registry for Multi-Tenant Context
 status: Done
 priority: Medium
 category: scopes
-upstream_ref: https://github.com/supernalintelligence/supernal-coding/blob/main/docs/architecture/decisions/2026-01-09-unified-cli-api-mcp-abstraction.md
 tests:
   - src/scopes/ScopeRegistry.test.ts
 created: '2026-01-09'

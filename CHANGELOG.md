@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+### Added
+
+- Repotype checks the repository layout (`repotype.yaml`, `pnpm run repo:lint`, and a CI step), so stray root files, committed build output and missing release documents fail the build.
+
 ### Changed
 
+- Removed the unused `zod` ^3 dependency. No source file imports it, and the MCP packages bring their own `zod` 4.
+- Lint runs on the TypeScript sources again: ESLint 9 flat config with the typescript-eslint parser (new dev dependencies).
 - Breaking: the MCP adapter moved from `@modelcontextprotocol/sdk` (1.x) to `@modelcontextprotocol/server` and `@modelcontextprotocol/node` (2.x), now regular dependencies of this package, so a consumer needs no extra install. Requires Node 20 or newer and the 2.x packages' own `zod` 4.2 dependency. Version 0.2.0.
 - `createMCPHttpApp` takes `protocolEra`. The default, `'legacy'`, answers 2025-era traffic in JSON exactly as before. `'both'` also serves the 2026-07-28 era and answers 2025-era requests as an event stream.
 - In `'both'` mode the caller identity builder refuses a request object that carries no headers (a defensive check: the SDK always passes a real request, so this does not occur through `toNodeHandler`).
